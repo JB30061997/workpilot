@@ -6,20 +6,30 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('axes', function (Blueprint $table) {
             $table->id();
+
+            $table->foreignId('action_plan_id')
+                ->constrained()
+                ->cascadeOnDelete();
+
+            $table->string('name');
+            $table->string('code')->nullable();
+
+            $table->text('description')->nullable();
+
+            $table->unsignedInteger('position')->default(0);
+
+            $table->boolean('is_active')->default(true);
+
             $table->timestamps();
+
+            $table->index(['action_plan_id', 'position']);
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('axes');

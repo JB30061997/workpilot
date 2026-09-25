@@ -6,20 +6,47 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
         Schema::create('time_slots', function (Blueprint $table) {
             $table->id();
+
+            $table->foreignId('work_session_id')
+                ->constrained()
+                ->cascadeOnDelete();
+
+            $table->foreignId('task_id')
+                ->nullable()
+                ->constrained()
+                ->nullOnDelete();
+
+            $table->foreignId('created_by')
+                ->constrained('users')
+                ->cascadeOnDelete();
+
+            $table->string('title');
+
+            $table->text('description')->nullable();
+
+            $table->dateTime('start_at');
+            $table->dateTime('end_at');
+
+            $table->enum('status', [
+                'planned',
+                'in_progress',
+                'completed',
+                'cancelled'
+            ])->default('planned');
+
+            $table->boolean('is_locked')->default(false);
+
             $table->timestamps();
+
+            $table->index(['work_session_id', 'start_at']);
+            $table->index(['start_at', 'end_at']);
         });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::dropIfExists('time_slots');

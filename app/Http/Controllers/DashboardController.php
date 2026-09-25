@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\ActionPlan;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Project;
@@ -19,8 +20,8 @@ class DashboardController extends Controller
      * Dashboard principal WorkPilot.
      *
      * Toutes les données sont filtrées par :
-     * 1. Société active
-     * 2. Service actif
+     * - Société active
+     * - Service actif
      */
     public function index(Request $request): Response
     {
@@ -51,8 +52,6 @@ class DashboardController extends Controller
 
         $organizationId = session('current_organization_id');
 
-        // Vérifier que la société stockée en session
-        // appartient toujours à l'utilisateur.
         if (
             !$organizationId ||
             !$organizations->contains('id', (int) $organizationId)
@@ -68,7 +67,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 3. Services accessibles dans la société active
+        | 3. Services accessibles
         |--------------------------------------------------------------------------
         */
 
@@ -92,8 +91,6 @@ class DashboardController extends Controller
 
         $departmentId = session('current_department_id');
 
-        // Empêche par exemple un utilisateur Finance
-        // d'utiliser manuellement l'ID du service IT.
         if (
             !$departmentId ||
             !$departments->contains('id', (int) $departmentId)
@@ -137,25 +134,11 @@ class DashboardController extends Controller
 
         $tasksCount = (clone $tasksQuery)->count();
 
-        /*
-        | Une tâche est terminée lorsque son statut
-        | possède is_closed = true.
-        |
-        | On ne dépend donc PAS du nom du statut.
-        */
-
         $completedTasksCount = (clone $tasksQuery)
             ->whereHas('status', function ($query) {
                 $query->where('is_closed', true);
             })
             ->count();
-
-        /*
-        | Tâches en retard :
-        |
-        | - date dépassée
-        | - pas encore terminées
-        */
 
         $overdueTasksCount = (clone $tasksQuery)
             ->whereNotNull('due_at')
@@ -167,19 +150,97 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 7. Avancement global du service
+        | 7. Progression calculée depuis les tâches
         |--------------------------------------------------------------------------
+        |
+        | On garde cette statistique disponible.
+        | Le progress global principal du service sera basé sur
+        | les plans d'action actifs.
+        |
         */
 
-        $departmentProgress = $tasksCount > 0
-            ? round(
+        $tasksProgress = $tasksCount > 0
+            ? (int) round(
                 ($completedTasksCount / $tasksCount) * 100
             )
             : 0;
 
         /*
         |--------------------------------------------------------------------------
-        | 8. Mes tâches
+        | 8. Plans d'action du service
+        |--------------------------------------------------------------------------
+        */
+
+        $actionPlans = ActionPlan::query()
+            ->where('organization_id', $organizationId)
+            ->where('department_id', $departmentId)
+            ->where('is_active', true)
+            ->withCount([
+                'axes',
+                'projects',
+            ])
+            ->with([
+                'axes' => function ($query) {
+                    $query
+                        ->where('is_active', true)
+                        ->orderBy('position');
+                },
+            ])
+            ->orderBy('name')
+            ->get()
+            ->map(function ($plan) {
+                return [
+                    'id' => $plan->id,
+                    'name' => $plan->name,
+                    'code' => $plan->code,
+                    'description' => $plan->description,
+
+                    'status' => $plan->status,
+                    'progress' => (int) $plan->progress,
+
+                    'start_date' => $plan->start_date,
+                    'end_date' => $plan->end_date,
+
+                    'axes_count' => (int) $plan->axes_count,
+                    'projects_count' => (int) $plan->projects_count,
+
+                    'axes' => $plan->axes
+                        ->map(function ($axis) {
+                            return [
+                                'id' => $axis->id,
+                                'name' => $axis->name,
+                                'code' => $axis->code,
+                                'position' => $axis->position,
+                            ];
+                        })
+                        ->values(),
+                ];
+            });
+
+        /*
+        |--------------------------------------------------------------------------
+        | 9. Progression globale du service
+        |--------------------------------------------------------------------------
+        |
+        | Exemple :
+        |
+        | Infrastructure IT     = 45%
+        | Solutions Digitales   = 35%
+        |
+        | Service IT            = 40%
+        |
+        | Plus tard, cette logique pourra être remplacée par
+        | une pondération automatique basée sur les projets/tâches.
+        |
+        */
+
+        $serviceProgress = $actionPlans->isNotEmpty()
+            ? (int) round($actionPlans->avg('progress'))
+            : 0;
+
+        /*
+        |--------------------------------------------------------------------------
+        | 10. Mes tâches
         |--------------------------------------------------------------------------
         */
 
@@ -200,7 +261,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 9. Sessions de travail
+        | 11. Sessions de travail
         |--------------------------------------------------------------------------
         */
 
@@ -211,7 +272,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 10. Planning du jour
+        | 12. Planning du jour
         |--------------------------------------------------------------------------
         */
 
@@ -236,7 +297,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 11. Membres du service
+        | 13. Membres du service
         |--------------------------------------------------------------------------
         */
 
@@ -268,17 +329,25 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 12. Liste des projets récents
+        | 14. Projets récents
         |--------------------------------------------------------------------------
         */
 
         $projects = Project::query()
             ->where('organization_id', $organizationId)
             ->where('department_id', $departmentId)
+            ->with([
+                'actionPlan:id,name,code',
+                'axis:id,name,code',
+            ])
             ->orderByDesc('created_at')
             ->limit(10)
             ->get([
                 'id',
+                'organization_id',
+                'department_id',
+                'action_plan_id',
+                'axis_id',
                 'name',
                 'code',
                 'status',
@@ -286,11 +355,12 @@ class DashboardController extends Controller
                 'progress',
                 'start_date',
                 'due_date',
+                'created_at',
             ]);
 
         /*
         |--------------------------------------------------------------------------
-        | 13. Répartition des tâches par statut
+        | 15. Répartition des tâches par statut
         |--------------------------------------------------------------------------
         */
 
@@ -323,7 +393,7 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 14. Contexte utilisateur
+        | 16. Contexte WorkPilot
         |--------------------------------------------------------------------------
         */
 
@@ -339,25 +409,38 @@ class DashboardController extends Controller
                 'code' => $department->code,
             ],
 
-            'organizations' => $organizations->map(
-                fn ($item) => [
-                    'id' => $item->id,
-                    'name' => $item->name,
-                ]
-            )->values(),
+            /*
+            | Sociétés accessibles par l'utilisateur.
+            | Utilisé plus tard pour le sélecteur société.
+            */
 
-            'departments' => $departments->map(
-                fn ($item) => [
-                    'id' => $item->id,
-                    'name' => $item->name,
-                    'code' => $item->code,
-                ]
-            )->values(),
+            'organizations' => $organizations
+                ->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'name' => $item->name,
+                    ];
+                })
+                ->values(),
+
+            /*
+            | Services accessibles dans la société actuelle.
+            */
+
+            'departments' => $departments
+                ->map(function ($item) {
+                    return [
+                        'id' => $item->id,
+                        'name' => $item->name,
+                        'code' => $item->code,
+                    ];
+                })
+                ->values(),
         ];
 
         /*
         |--------------------------------------------------------------------------
-        | 15. Statistiques
+        | 17. Statistiques Dashboard
         |--------------------------------------------------------------------------
         */
 
@@ -376,12 +459,26 @@ class DashboardController extends Controller
 
             'team_members' => $teamMembers->count(),
 
-            'department_progress' => $departmentProgress,
+            /*
+            | Progression globale principale du service :
+            | moyenne des plans d'action actifs.
+            */
+
+            'department_progress' => $serviceProgress,
+
+            /*
+            | Progression secondaire :
+            | basée uniquement sur les tâches terminées.
+            */
+
+            'tasks_progress' => $tasksProgress,
+
+            'action_plans' => $actionPlans->count(),
         ];
 
         /*
         |--------------------------------------------------------------------------
-        | 16. Vue
+        | 18. Dashboard
         |--------------------------------------------------------------------------
         */
 
@@ -389,6 +486,8 @@ class DashboardController extends Controller
             'context' => $context,
 
             'stats' => $stats,
+
+            'actionPlans' => $actionPlans,
 
             'projects' => $projects,
 

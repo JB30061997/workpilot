@@ -4,7 +4,6 @@ namespace App\Policies;
 
 use App\Models\Task;
 use App\Models\User;
-use Illuminate\Auth\Access\Response;
 
 class TaskPolicy
 {
@@ -13,7 +12,7 @@ class TaskPolicy
      */
     public function viewAny(User $user): bool
     {
-        return false;
+        return $user->departmentMemberships()->where('is_active', true)->exists();
     }
 
     /**
@@ -21,7 +20,11 @@ class TaskPolicy
      */
     public function view(User $user, Task $task): bool
     {
-        return false;
+        if (! $this->belongsToDepartment($user, $task)) {
+            return false;
+        }
+
+        return $task->workSession === null || $user->can('view', $task->workSession);
     }
 
     /**
@@ -29,7 +32,7 @@ class TaskPolicy
      */
     public function create(User $user): bool
     {
-        return false;
+        return $user->departmentMemberships()->where('is_active', true)->exists();
     }
 
     /**
@@ -37,7 +40,16 @@ class TaskPolicy
      */
     public function update(User $user, Task $task): bool
     {
-        return false;
+        return $this->view($user, $task)
+            && (int) $task->created_by === (int) $user->id;
+    }
+
+    /**
+     * Determine whether the user can move a visible task to another status.
+     */
+    public function updateStatus(User $user, Task $task): bool
+    {
+        return $this->view($user, $task);
     }
 
     /**
@@ -45,7 +57,16 @@ class TaskPolicy
      */
     public function delete(User $user, Task $task): bool
     {
-        return false;
+        if (! $this->view($user, $task)) {
+            return false;
+        }
+
+        return $task->workSession === null
+            || (int) $task->created_by === (int) $user->id
+            || $task->workSession->members()
+                ->whereKey($user->id)
+                ->wherePivotIn('role', ['owner', 'member'])
+                ->exists();
     }
 
     /**
@@ -62,5 +83,14 @@ class TaskPolicy
     public function forceDelete(User $user, Task $task): bool
     {
         return false;
+    }
+
+    private function belongsToDepartment(User $user, Task $task): bool
+    {
+        return $task->department_id !== null
+            && $user->departments()
+                ->whereKey($task->department_id)
+                ->wherePivot('is_active', true)
+                ->exists();
     }
 }

@@ -2,11 +2,11 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 
 class Project extends Model
@@ -18,8 +18,10 @@ class Project extends Model
         'department_id',
         'action_plan_id',
         'axis_id',
+        'project_category_id',
         'manager_id',
         'created_by',
+        'creation_token',
         'name',
         'code',
         'description',
@@ -27,6 +29,7 @@ class Project extends Model
         'due_date',
         'status',
         'priority',
+        'position',
         'progress',
         'is_private',
         'is_active',
@@ -38,6 +41,7 @@ class Project extends Model
             'start_date' => 'date',
             'due_date' => 'date',
             'progress' => 'integer',
+            'position' => 'integer',
             'is_private' => 'boolean',
             'is_active' => 'boolean',
         ];
@@ -53,6 +57,11 @@ class Project extends Model
         return $this->belongsTo(Department::class);
     }
 
+    public function departments(): BelongsToMany
+    {
+        return $this->belongsToMany(Department::class, 'project_department')->withTimestamps();
+    }
+
     public function actionPlan(): BelongsTo
     {
         return $this->belongsTo(ActionPlan::class);
@@ -61,6 +70,11 @@ class Project extends Model
     public function axis(): BelongsTo
     {
         return $this->belongsTo(Axis::class);
+    }
+
+    public function category(): BelongsTo
+    {
+        return $this->belongsTo(ProjectCategory::class, 'project_category_id');
     }
 
     public function manager(): BelongsTo
@@ -94,6 +108,13 @@ class Project extends Model
         return $this->hasMany(Action::class);
     }
 
+    public function recalculateProgress(): void
+    {
+        $progress = (int) round((float) ($this->actions()->avg('progress') ?? 0));
+
+        $this->forceFill(['progress' => $progress])->saveQuietly();
+    }
+
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);
@@ -107,5 +128,25 @@ class Project extends Model
     public function attachments(): MorphMany
     {
         return $this->morphMany(Attachment::class, 'attachable');
+    }
+
+    public function chatMessages()
+    {
+        return $this->hasMany(ProjectChatMessage::class);
+    }
+
+    public function chatReads()
+    {
+        return $this->hasMany(ProjectChatRead::class);
+    }
+
+    public function chatMembers()
+    {
+        return $this->belongsToMany(
+            User::class,
+            'project_members',
+            'project_id',
+            'user_id'
+        )->withPivot('role', 'joined_at')->withTimestamps();
     }
 }

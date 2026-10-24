@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+    <defs>
+        <linearGradient id="workpilot-gradient" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#3b82f6" />
+            <stop offset="1" stop-color="#4f46e5" />
+        </linearGradient>
+    </defs>
+    <rect width="64" height="64" rx="17" fill="url(#workpilot-gradient)" />
+    <rect x="17" y="32" width="6" height="15" rx="3" fill="#ffffff" />
+    <rect x="26" y="18" width="6" height="29" rx="3" fill="#ffffff" />
+    <rect x="35" y="26" width="6" height="21" rx="3" fill="#ffffff" />
+    <rect x="44" y="13" width="6" height="34" rx="3" fill="#ffffff" />
+</svg>

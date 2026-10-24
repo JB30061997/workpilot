@@ -25,6 +25,7 @@ class RoleSeeder extends Seeder
                 'slug' => 'director',
                 'permissions' => [
                     'organizations.view',
+                    'organizations.update',
                     'departments.view',
                     'users.view',
                     'action_plans.view',

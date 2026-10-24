@@ -3,8 +3,8 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Action extends Model
 {
@@ -19,6 +19,8 @@ class Action extends Model
         'description',
         'start_date',
         'due_date',
+        'actual_start_date',
+        'actual_end_date',
         'status',
         'priority',
         'progress',
@@ -30,9 +32,22 @@ class Action extends Model
         return [
             'start_date' => 'date',
             'due_date' => 'date',
+            'actual_start_date' => 'date',
+            'actual_end_date' => 'date',
             'progress' => 'integer',
             'position' => 'integer',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        static::saved(function (Action $action): void {
+            $action->project?->recalculateProgress();
+        });
+
+        static::deleted(function (Action $action): void {
+            $action->project?->recalculateProgress();
+        });
     }
 
     public function organization(): BelongsTo
@@ -68,5 +83,10 @@ class Action extends Model
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);
+    }
+
+    public function comments(): HasMany
+    {
+        return $this->hasMany(ActionComment::class);
     }
 }

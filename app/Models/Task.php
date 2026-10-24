@@ -18,6 +18,7 @@ class Task extends Model
         'department_id',
         'project_id',
         'action_id',
+        'work_session_id',
         'status_id',
         'created_by',
         'parent_id',
@@ -66,6 +67,11 @@ class Task extends Model
     public function action(): BelongsTo
     {
         return $this->belongsTo(Action::class);
+    }
+
+    public function workSession(): BelongsTo
+    {
+        return $this->belongsTo(WorkSession::class);
     }
 
     public function status(): BelongsTo
@@ -123,5 +129,10 @@ class Task extends Model
     public function timeSlots(): HasMany
     {
         return $this->hasMany(TimeSlot::class);
+    }
+
+    public function plannings(): HasMany
+    {
+        return $this->hasMany(TaskPlanning::class);
     }
 }

@@ -3,19 +3,28 @@
 namespace App\Http\Controllers;
 
 use App\Models\ActionPlan;
+use App\Models\Axis;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Project;
+use App\Models\ProjectCategory;
 use App\Models\Task;
-use App\Models\TimeSlot;
+use App\Models\TaskPlanning;
 use App\Models\User;
 use App\Models\WorkSession;
+use App\Support\ProjectAccessAuthorizer;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
+    public function __construct(
+        private readonly ProjectAccessAuthorizer $projectAuthorizer,
+    ) {}
+
     /**
      * Dashboard principal WorkPilot.
      *
@@ -53,8 +62,8 @@ class DashboardController extends Controller
         $organizationId = session('current_organization_id');
 
         if (
-            !$organizationId ||
-            !$organizations->contains('id', (int) $organizationId)
+            ! $organizationId ||
+            ! $organizations->contains('id', (int) $organizationId)
         ) {
             $organizationId = $organizations->first()->id;
 
@@ -92,8 +101,8 @@ class DashboardController extends Controller
         $departmentId = session('current_department_id');
 
         if (
-            !$departmentId ||
-            !$departments->contains('id', (int) $departmentId)
+            ! $departmentId ||
+            ! $departments->contains('id', (int) $departmentId)
         ) {
             $departmentId = $departments->first()->id;
 
@@ -150,23 +159,6 @@ class DashboardController extends Controller
 
         /*
         |--------------------------------------------------------------------------
-        | 7. Progression calculée depuis les tâches
-        |--------------------------------------------------------------------------
-        |
-        | On garde cette statistique disponible.
-        | Le progress global principal du service sera basé sur
-        | les plans d'action actifs.
-        |
-        */
-
-        $tasksProgress = $tasksCount > 0
-            ? (int) round(
-                ($completedTasksCount / $tasksCount) * 100
-            )
-            : 0;
-
-        /*
-        |--------------------------------------------------------------------------
         | 8. Plans d'action du service
         |--------------------------------------------------------------------------
         */
@@ -184,6 +176,13 @@ class DashboardController extends Controller
                     $query
                         ->where('is_active', true)
                         ->orderBy('position');
+                },
+                'projects' => function ($query) {
+                    $query
+                        ->select(['id', 'action_plan_id', 'name', 'code', 'progress', 'status'])
+                        ->withMin('actions', 'actual_start_date')
+                        ->withMax('actions', 'actual_end_date')
+                        ->orderBy('name');
                 },
             ])
             ->orderBy('name')
@@ -203,6 +202,27 @@ class DashboardController extends Controller
 
                     'axes_count' => (int) $plan->axes_count,
                     'projects_count' => (int) $plan->projects_count,
+
+                    'projects' => $plan->projects
+                        ->map(function ($project) {
+                            $actualStartDate = $project->actions_min_actual_start_date;
+                            $actualEndDate = $project->actions_max_actual_end_date;
+                            $actualDurationDays = $actualStartDate && $actualEndDate
+                                ? CarbonImmutable::parse($actualStartDate)->diffInDays(CarbonImmutable::parse($actualEndDate)) + 1
+                                : 0;
+
+                            return [
+                                'id' => $project->id,
+                                'name' => $project->name,
+                                'code' => $project->code,
+                                'progress' => (int) $project->progress,
+                                'status' => $project->status,
+                                'actual_start_date' => $actualStartDate ? CarbonImmutable::parse($actualStartDate)->toDateString() : null,
+                                'actual_end_date' => $actualEndDate ? CarbonImmutable::parse($actualEndDate)->toDateString() : null,
+                                'actual_duration_days' => $actualDurationDays,
+                            ];
+                        })
+                        ->values(),
 
                     'axes' => $plan->axes
                         ->map(function ($axis) {
@@ -244,21 +264,6 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $myTasks = Task::query()
-            ->where('organization_id', $organizationId)
-            ->where('department_id', $departmentId)
-            ->whereHas('assignees', function ($query) use ($user) {
-                $query->where('users.id', $user->id);
-            })
-            ->with([
-                'status:id,name,slug,color,is_closed',
-                'project:id,name,code',
-            ])
-            ->orderByRaw('due_at IS NULL')
-            ->orderBy('due_at')
-            ->limit(10)
-            ->get();
-
         /*
         |--------------------------------------------------------------------------
         | 11. Sessions de travail
@@ -276,21 +281,16 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $todayPlanning = TimeSlot::query()
-            ->whereHas('workSession', function ($query) use (
-                $organizationId,
-                $departmentId
-            ) {
-                $query
-                    ->where('organization_id', $organizationId)
-                    ->where('department_id', $departmentId);
-            })
-            ->whereDate('start_at', today())
+        $todayPlanning = TaskPlanning::query()
+            ->where('organization_id', $organizationId)
+            ->where('department_id', $departmentId)
+            ->whereHas('task.assignees', fn ($query) => $query->whereKey($user->id))
+            ->where('start_at', '<=', today()->endOfDay())
+            ->where('end_at', '>=', today()->startOfDay())
             ->with([
-                'task:id,title,status_id,priority',
+                'task:id,project_id,title,status_id,priority,progress',
                 'task.status:id,name,color,is_closed',
-                'members:id,name,email',
-                'workSession:id,name',
+                'task.project:id,name,code',
             ])
             ->orderBy('start_at')
             ->get();
@@ -320,6 +320,27 @@ class DashboardController extends Controller
                         true
                     );
             })
+            ->with([
+                'assignedTasks' => function ($query) use ($organizationId, $departmentId) {
+                    $query
+                        ->where('tasks.organization_id', $organizationId)
+                        ->where('tasks.department_id', $departmentId)
+                        ->select([
+                            'tasks.id',
+                            'tasks.project_id',
+                            'tasks.status_id',
+                            'tasks.title',
+                            'tasks.priority',
+                            'tasks.progress',
+                            'tasks.due_at',
+                        ])
+                        ->orderByRaw('tasks.due_at IS NULL')
+                        ->orderBy('tasks.due_at')
+                        ->orderBy('tasks.title');
+                },
+                'assignedTasks.status:id,name,slug,color,is_closed',
+                'assignedTasks.project:id,name,code',
+            ])
             ->orderBy('name')
             ->get([
                 'users.id',
@@ -333,63 +354,131 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $projects = Project::query()
+        $projectFilters = $request->validate([
+            'project_search' => ['nullable', 'string', 'max:255'],
+            'project_status' => ['nullable', Rule::in(['draft', 'planned', 'in_progress', 'on_hold', 'completed', 'cancelled'])],
+            'project_priority' => ['nullable', Rule::in(['low', 'medium', 'high', 'critical'])],
+            'project_category_id' => ['nullable', 'integer', 'exists:project_categories,id'],
+            'project_sort' => ['nullable', Rule::in(['position', 'name', 'action_plan', 'axis', 'departments', 'category', 'manager', 'status', 'priority', 'progress', 'due_date', 'actions_count'])],
+            'project_direction' => ['nullable', Rule::in(['asc', 'desc'])],
+        ]);
+
+        $portfolioProjectsQuery = Project::query()
             ->where('organization_id', $organizationId)
-            ->where('department_id', $departmentId)
+            ->where(fn ($query) => $query
+                ->where('department_id', $departmentId)
+                ->orWhereHas('departments', fn ($departmentQuery) => $departmentQuery->whereKey($departmentId)))
+            ->when(! empty($projectFilters['project_search']), function ($query) use ($projectFilters): void {
+                $search = trim($projectFilters['project_search']);
+                $query->where(fn ($searchQuery) => $searchQuery
+                    ->where('name', 'like', '%'.$search.'%')
+                    ->orWhere('code', 'like', '%'.$search.'%')
+                    ->orWhere('description', 'like', '%'.$search.'%'));
+            })
+            ->when(! empty($projectFilters['project_status']), fn ($query) => $query->where('status', $projectFilters['project_status']))
+            ->when(! empty($projectFilters['project_priority']), fn ($query) => $query->where('priority', $projectFilters['project_priority']))
+            ->when(! empty($projectFilters['project_category_id']), fn ($query) => $query->where('project_category_id', $projectFilters['project_category_id']))
             ->with([
                 'actionPlan:id,name,code',
                 'axis:id,name,code',
+                'manager:id,name,email',
+                'category:id,organization_id,manager_id,name,slug',
+                'category.manager:id,name,email',
+                'departments:id,name,code',
+                'actions' => fn ($query) => $query
+                    ->select([
+                        'id',
+                        'project_id',
+                        'title',
+                        'description',
+                        'start_date',
+                        'due_date',
+                        'actual_start_date',
+                        'actual_end_date',
+                        'status',
+                        'priority',
+                        'progress',
+                        'position',
+                    ])
+                    ->orderBy('position')
+                    ->orderBy('id'),
+                'actions.comments' => fn ($query) => $query
+                    ->select(['id', 'action_id', 'user_id', 'content', 'created_at'])
+                    ->oldest(),
+                'actions.comments.user:id,name',
             ])
-            ->orderByDesc('created_at')
-            ->limit(10)
-            ->get([
+            ->select([
                 'id',
                 'organization_id',
                 'department_id',
                 'action_plan_id',
                 'axis_id',
+                'project_category_id',
+                'manager_id',
+                'created_by',
                 'name',
                 'code',
                 'status',
                 'priority',
+                'position',
                 'progress',
                 'start_date',
                 'due_date',
                 'created_at',
-            ]);
+            ])
+            ->withCount('actions');
 
-        /*
-        |--------------------------------------------------------------------------
-        | 15. Répartition des tâches par statut
-        |--------------------------------------------------------------------------
-        */
+        if (! empty($projectFilters['project_sort'])) {
+            $sortExpression = match ($projectFilters['project_sort']) {
+                'action_plan' => ActionPlan::query()->select('name')->whereColumn('action_plans.id', 'projects.action_plan_id')->limit(1),
+                'axis' => Axis::query()->select('name')->whereColumn('axes.id', 'projects.axis_id')->limit(1),
+                'departments' => Department::query()->select('departments.name')->join('project_department', 'project_department.department_id', '=', 'departments.id')->whereColumn('project_department.project_id', 'projects.id')->orderBy('departments.name')->limit(1),
+                'category' => ProjectCategory::query()->select('name')->whereColumn('project_categories.id', 'projects.project_category_id')->limit(1),
+                'manager' => User::query()->select('name')->whereColumn('users.id', 'projects.manager_id')->limit(1),
+                'actions_count' => 'actions_count',
+                default => 'projects.'.$projectFilters['project_sort'],
+            };
+            $portfolioProjectsQuery
+                ->orderBy($sortExpression, $projectFilters['project_direction'] ?? 'asc')
+                ->orderBy('projects.id');
+        } else {
+            $portfolioProjectsQuery
+                ->orderByRaw('CASE WHEN progress > 0 AND progress < 100 THEN 0 WHEN progress = 0 THEN 1 ELSE 2 END')
+                ->orderByRaw('CASE WHEN progress > 0 AND progress < 100 THEN progress END DESC')
+                ->orderBy('name');
+        }
 
-        $tasksByStatus = Task::query()
-            ->where('tasks.organization_id', $organizationId)
-            ->where('tasks.department_id', $departmentId)
-            ->join(
-                'task_statuses',
-                'task_statuses.id',
-                '=',
-                'tasks.status_id'
-            )
-            ->selectRaw('
-                task_statuses.id,
-                task_statuses.name,
-                task_statuses.slug,
-                task_statuses.color,
-                task_statuses.is_closed,
-                COUNT(tasks.id) as total
-            ')
-            ->groupBy(
-                'task_statuses.id',
-                'task_statuses.name',
-                'task_statuses.slug',
-                'task_statuses.color',
-                'task_statuses.is_closed'
-            )
-            ->orderBy('task_statuses.position')
-            ->get();
+        $solutionsProjects = (clone $portfolioProjectsQuery)
+            ->whereHas('actionPlan', function ($query) {
+                $query->where('code', 'like', '%SOLUTIONS%');
+            })
+            ->paginate(10, ['*'], 'solutions_page')
+            ->through(fn (Project $project) => $this->prepareDashboardProject(
+                $project,
+                $request,
+                (int) $organizationId,
+                (int) $departmentId,
+            ))
+            ->appends($request->except(['solutions_page', 'portfolio']))
+            ->appends(['portfolio' => 'solutions']);
+
+        $infrastructureProjects = (clone $portfolioProjectsQuery)
+            ->whereHas('actionPlan', function ($query) {
+                $query->where('code', 'like', '%INFRA%');
+            })
+            ->paginate(10, ['*'], 'infrastructure_page')
+            ->through(fn (Project $project) => $this->prepareDashboardProject(
+                $project,
+                $request,
+                (int) $organizationId,
+                (int) $departmentId,
+            ))
+            ->appends($request->except(['infrastructure_page', 'portfolio']))
+            ->appends(['portfolio' => 'infrastructure']);
+
+        $portfolioTab = in_array($request->string('portfolio')->toString(), ['solutions', 'infrastructure'], true)
+            ? $request->string('portfolio')->toString()
+            : 'solutions';
 
         /*
         |--------------------------------------------------------------------------
@@ -466,13 +555,6 @@ class DashboardController extends Controller
 
             'department_progress' => $serviceProgress,
 
-            /*
-            | Progression secondaire :
-            | basée uniquement sur les tâches terminées.
-            */
-
-            'tasks_progress' => $tasksProgress,
-
             'action_plans' => $actionPlans->count(),
         ];
 
@@ -489,15 +571,60 @@ class DashboardController extends Controller
 
             'actionPlans' => $actionPlans,
 
-            'projects' => $projects,
+            'projectPortfolios' => [
+                'solutions' => $solutionsProjects,
+                'infrastructure' => $infrastructureProjects,
+            ],
 
-            'myTasks' => $myTasks,
+            'portfolioTab' => $portfolioTab,
+
+            'projectFilters' => $projectFilters,
+
+            'projectCategories' => ProjectCategory::query()
+                ->where('organization_id', $organizationId)
+                ->where('is_active', true)
+                ->with('manager:id,name,email')
+                ->orderBy('name')
+                ->get(['id', 'organization_id', 'manager_id', 'name', 'slug']),
+
+            'projectStatuses' => ['draft', 'planned', 'in_progress', 'on_hold', 'completed', 'cancelled'],
+
+            'projectPriorities' => ['low', 'medium', 'high', 'critical'],
 
             'todayPlanning' => $todayPlanning,
 
             'teamMembers' => $teamMembers,
-
-            'tasksByStatus' => $tasksByStatus,
         ]);
+    }
+
+    private function prepareDashboardProject(
+        Project $project,
+        Request $request,
+        int $organizationId,
+        int $departmentId,
+    ): Project {
+        $project->setAttribute('can_manage', $this->projectAuthorizer->canManageProject(
+            $request->user(),
+            $project,
+            $organizationId,
+            $departmentId,
+        ));
+        $project->setAttribute('can_manage_actions', $this->projectAuthorizer->canManageProjectActions(
+            $request->user(),
+            $project,
+            $organizationId,
+            $departmentId,
+        ));
+
+        $project->actions->each(function ($action) use ($request): void {
+            $action->comments->each(function ($comment) use ($request): void {
+                $comment->setAttribute(
+                    'can_edit',
+                    (int) $comment->user_id === (int) $request->user()->id,
+                );
+            });
+        });
+
+        return $project;
     }
 }

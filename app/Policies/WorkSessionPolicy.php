@@ -4,7 +4,6 @@ namespace App\Policies;
 
 use App\Models\User;
 use App\Models\WorkSession;
-use Illuminate\Auth\Access\Response;
 
 class WorkSessionPolicy
 {
@@ -13,7 +12,7 @@ class WorkSessionPolicy
      */
     public function viewAny(User $user): bool
     {
-        return false;
+        return $user->departmentMemberships()->where('is_active', true)->exists();
     }
 
     /**
@@ -21,7 +20,13 @@ class WorkSessionPolicy
      */
     public function view(User $user, WorkSession $workSession): bool
     {
-        return false;
+        if (! $this->belongsToDepartment($user, $workSession)) {
+            return false;
+        }
+
+        return $workSession->visibility === 'department'
+            || (int) $workSession->created_by === (int) $user->id
+            || $workSession->members()->whereKey($user->id)->exists();
     }
 
     /**
@@ -29,7 +34,7 @@ class WorkSessionPolicy
      */
     public function create(User $user): bool
     {
-        return false;
+        return $user->departmentMemberships()->where('is_active', true)->exists();
     }
 
     /**
@@ -37,7 +42,7 @@ class WorkSessionPolicy
      */
     public function update(User $user, WorkSession $workSession): bool
     {
-        return false;
+        return $this->canManage($user, $workSession);
     }
 
     /**
@@ -45,7 +50,7 @@ class WorkSessionPolicy
      */
     public function delete(User $user, WorkSession $workSession): bool
     {
-        return false;
+        return $this->canManage($user, $workSession);
     }
 
     /**
@@ -62,5 +67,27 @@ class WorkSessionPolicy
     public function forceDelete(User $user, WorkSession $workSession): bool
     {
         return false;
+    }
+
+    private function belongsToDepartment(User $user, WorkSession $workSession): bool
+    {
+        return $workSession->department_id !== null
+            && $user->departments()
+                ->whereKey($workSession->department_id)
+                ->wherePivot('is_active', true)
+                ->exists();
+    }
+
+    private function canManage(User $user, WorkSession $workSession): bool
+    {
+        if (! $this->belongsToDepartment($user, $workSession)) {
+            return false;
+        }
+
+        return (int) $workSession->created_by === (int) $user->id
+            || $workSession->members()
+                ->whereKey($user->id)
+                ->wherePivot('role', 'owner')
+                ->exists();
     }
 }

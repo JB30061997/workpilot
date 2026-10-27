@@ -76,6 +76,11 @@ class Department extends Model
         return $this->belongsToMany(Project::class, 'project_department')->withTimestamps();
     }
 
+    public function projectResponsibilities(): HasMany
+    {
+        return $this->hasMany(ProjectDepartmentResponsible::class);
+    }
+
     public function tasks(): HasMany
     {
         return $this->hasMany(Task::class);

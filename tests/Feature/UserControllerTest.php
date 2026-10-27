@@ -166,6 +166,60 @@ class UserControllerTest extends TestCase
         ]);
     }
 
+    public function test_director_can_assign_a_management_role_to_multiple_departments(): void
+    {
+        $director = User::factory()->create();
+        [$organization, $department] = $this->createContext($director);
+        $finance = Department::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Finance',
+        ]);
+        $humanResources = Department::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Ressources Humaines',
+        ]);
+        $managerRole = Role::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Directeur de département',
+            'slug' => 'department-manager',
+            'is_active' => true,
+        ]);
+        $member = User::factory()->create();
+        $member->organizations()->attach($organization, ['status' => 'active', 'is_active' => true]);
+        $member->departments()->attach($department, ['is_primary' => true, 'is_active' => true]);
+
+        $response = $this
+            ->actingAs($director)
+            ->withSession($this->contextSession($organization, $department))
+            ->patch(route('users.update', $member), [
+                'role_id' => $managerRole->id,
+                'department_ids' => [$finance->id, $humanResources->id],
+            ]);
+
+        $response->assertSessionHasNoErrors()->assertRedirect();
+        $this->assertDatabaseMissing('department_members', [
+            'department_id' => $department->id,
+            'user_id' => $member->id,
+        ]);
+        $this->assertDatabaseHas('department_members', [
+            'department_id' => $finance->id,
+            'user_id' => $member->id,
+            'is_manager' => true,
+            'is_primary' => true,
+        ]);
+        $this->assertDatabaseHas('department_members', [
+            'department_id' => $humanResources->id,
+            'user_id' => $member->id,
+            'is_manager' => true,
+            'is_primary' => false,
+        ]);
+        $this->assertDatabaseHas('user_roles', [
+            'organization_id' => $organization->id,
+            'user_id' => $member->id,
+            'role_id' => $managerRole->id,
+        ]);
+    }
+
     /**
      * @return array{Organization, Department}
      */

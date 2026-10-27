@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Models\Permission;
+use App\Models\PlanningYear;
 use App\Models\ProjectCategory;
 use App\Models\Role;
 use App\Models\TaskStatus;
@@ -53,6 +54,8 @@ class ReferentialController extends Controller
             session(['current_organization_id' => $organization->id]);
         }
 
+        $currentPlanningYear = PlanningYear::resolveForOrganization($organization->id, now());
+
         return Inertia::render('Referential/Index', [
             'organization' => $organization->only(['id', 'name']),
             'organizations' => $organizations,
@@ -80,6 +83,15 @@ class ReferentialController extends Controller
                 ->orderBy('position')
                 ->orderBy('name')
                 ->get(),
+            'planningYears' => PlanningYear::query()
+                ->where('organization_id', $organization->id)
+                ->withCount('actionPlans')
+                ->orderByDesc('start_date')
+                ->get()
+                ->each(fn (PlanningYear $planningYear) => $planningYear->setAttribute(
+                    'is_current',
+                    $planningYear->is($currentPlanningYear)
+                )),
             'roles' => Role::query()
                 ->where('organization_id', $organization->id)
                 ->with('permissions:id,name,module')
@@ -92,7 +104,7 @@ class ReferentialController extends Controller
                 ->orderBy('module')
                 ->orderBy('name')
                 ->get(),
-            'activeTab' => in_array($request->string('tab')->toString(), ['statuses', 'organizations', 'departments', 'project-categories', 'roles', 'permissions'], true)
+            'activeTab' => in_array($request->string('tab')->toString(), ['statuses', 'years', 'organizations', 'departments', 'project-categories', 'roles', 'permissions'], true)
                 ? $request->string('tab')->toString()
                 : 'statuses',
             'canManageAccess' => $canManageAccess,

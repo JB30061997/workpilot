@@ -67,6 +67,13 @@ const navigationGroups = [
                 icon: "projects",
             },
             {
+                label: "Processus",
+                shortLabel: "Workflows",
+                route: "workflows.library",
+                pattern: "workflows.*",
+                icon: "workflow",
+            },
+            {
                 label: "Chat",
                 shortLabel: "Chat",
                 route: "project-chat.index",
@@ -117,6 +124,13 @@ const navigationGroups = [
                 route: "users.index",
                 pattern: "users.*",
                 icon: "users",
+            },
+            {
+                label: "Rôles & permissions",
+                shortLabel: "Accès",
+                route: "access-control.index",
+                pattern: "access-control.*",
+                icon: "shield",
             },
             {
                 label: "Référentiel",

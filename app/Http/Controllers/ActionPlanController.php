@@ -5,7 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\ActionPlan;
 use App\Models\Department;
 use App\Models\Organization;
+use App\Models\PlanningYear;
 use App\Services\UniqueCodeGenerator;
+use App\Services\WorkContextDepartmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,7 +26,10 @@ class ActionPlanController extends Controller
         'archived',
     ];
 
-    public function __construct(private readonly UniqueCodeGenerator $codeGenerator) {}
+    public function __construct(
+        private readonly UniqueCodeGenerator $codeGenerator,
+        private readonly WorkContextDepartmentService $departmentAccess,
+    ) {}
 
     /**
      * Resolve the active organization of the authenticated user.
@@ -66,19 +71,11 @@ class ActionPlanController extends Controller
         Request $request,
         Organization $organization
     ): Department {
-        $department = $request->user()
-            ->departments()
-            ->where(
-                'departments.organization_id',
-                $organization->id
-            )
-            ->wherePivot('is_active', true)
-            ->when(
-                session('current_department_id'),
-                fn ($query, $departmentId) => $query->whereKey($departmentId)
-            )
-            ->orderByDesc('department_members.is_primary')
-            ->first();
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($request->user(), $organization->id);
+        $department = session('current_department_id')
+            ? $departments->firstWhere('id', (int) session('current_department_id'))
+            : $departments->first();
 
         if (! $department && session()->has('current_department_id')) {
             session()->forget('current_department_id');
@@ -141,6 +138,14 @@ class ActionPlanController extends Controller
             ->firstOrFail();
     }
 
+    private function findScopedPlanningYear(Organization $organization, int $planningYearId): PlanningYear
+    {
+        return PlanningYear::query()
+            ->whereKey($planningYearId)
+            ->where('organization_id', $organization->id)
+            ->firstOrFail();
+    }
+
     /**
      * Validation rules used when creating/updating an ActionPlan.
      */
@@ -153,6 +158,12 @@ class ActionPlanController extends Controller
                 $required,
                 'string',
                 'max:255',
+            ],
+
+            'planning_year_id' => [
+                'nullable',
+                'integer',
+                'exists:planning_years,id',
             ],
 
             'description' => [
@@ -238,9 +249,20 @@ class ActionPlanController extends Controller
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'status' => ['nullable', Rule::in(self::STATUSES)],
+            'planning_year_id' => ['nullable', 'integer', 'exists:planning_years,id'],
             'is_active' => ['nullable', 'boolean'],
             'open_plan' => ['nullable', 'integer'],
         ]);
+
+        if (! empty($filters['planning_year_id'])) {
+            $this->findScopedPlanningYear($organization, (int) $filters['planning_year_id']);
+        }
+
+        $currentPlanningYear = PlanningYear::resolveForOrganization($organization->id, now());
+        $planningYears = PlanningYear::query()
+            ->where('organization_id', $organization->id)
+            ->orderByDesc('start_date')
+            ->get(['id', 'label', 'start_date', 'end_date']);
 
         $actionPlans = ActionPlan::query()
             ->where(
@@ -253,6 +275,7 @@ class ActionPlanController extends Controller
             )
             ->with([
                 'creator:id,name,email',
+                'planningYear:id,label,start_date,end_date',
                 'axes' => fn ($query) => $query
                     ->withCount(['projects', 'actions'])
                     ->orderBy('position')
@@ -331,6 +354,10 @@ class ActionPlanController extends Controller
                 fn ($query) => $query->where('status', $filters['status'])
             )
             ->when(
+                ! empty($filters['planning_year_id']),
+                fn ($query) => $query->where('planning_year_id', $filters['planning_year_id'])
+            )
+            ->when(
                 array_key_exists('is_active', $filters),
                 fn ($query) => $query->where('is_active', $filters['is_active'])
             )
@@ -352,6 +379,8 @@ class ActionPlanController extends Controller
 
             'action_plans' => $actionPlans,
             'filters' => $filters,
+            'planningYears' => $planningYears,
+            'currentPlanningYearId' => $currentPlanningYear->id,
             'openActionPlanId' => isset($filters['open_plan']) ? (int) $filters['open_plan'] : null,
         ];
 
@@ -380,23 +409,29 @@ class ActionPlanController extends Controller
             $this->validationMessages()
         );
 
+        $planningYear = ! empty($data['planning_year_id'])
+            ? $this->findScopedPlanningYear($organization, (int) $data['planning_year_id'])
+            : PlanningYear::resolveForOrganization($organization->id, now());
+
         $actionPlan = DB::transaction(function () use (
             $data,
             $organization,
             $department,
+            $planningYear,
             $request
         ) {
             return ActionPlan::create([
                 'organization_id' => $organization->id,
                 'department_id' => $department->id,
+                'planning_year_id' => $planningYear->id,
                 'created_by' => $request->user()->id,
 
                 'name' => $data['name'],
                 'code' => $this->codeGenerator->forActionPlan($data['name'], $organization->id),
                 'description' => $data['description'] ?? null,
 
-                'start_date' => $data['start_date'] ?? null,
-                'end_date' => $data['end_date'] ?? null,
+                'start_date' => $planningYear->start_date,
+                'end_date' => $planningYear->end_date,
 
                 'status' => $data['status'],
                 'progress' => $data['progress'],
@@ -463,6 +498,16 @@ class ActionPlanController extends Controller
             $this->rules(true),
             $this->validationMessages()
         );
+
+        if (array_key_exists('planning_year_id', $data) && $data['planning_year_id'] !== null) {
+            $planningYear = $this->findScopedPlanningYear(
+                $actionPlan->organization,
+                (int) $data['planning_year_id']
+            );
+            $data['planning_year_id'] = $planningYear->id;
+            $data['start_date'] = $planningYear->start_date->toDateString();
+            $data['end_date'] = $planningYear->end_date->toDateString();
+        }
 
         /*
          * If only end_date is updated, Laravel's after_or_equal:start_date

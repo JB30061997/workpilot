@@ -48,14 +48,14 @@ class User extends Authenticatable
             Organization::class,
             'organization_members'
         )
-        ->withPivot([
-            'job_title',
-            'status',
-            'joined_at',
-            'is_owner',
-            'is_active',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'job_title',
+                'status',
+                'joined_at',
+                'is_owner',
+                'is_active',
+            ])
+            ->withTimestamps();
     }
 
     // =========================================================
@@ -73,13 +73,13 @@ class User extends Authenticatable
             Department::class,
             'department_members'
         )
-        ->withPivot([
-            'is_manager',
-            'is_primary',
-            'is_active',
-            'joined_at',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'is_manager',
+                'is_primary',
+                'is_active',
+                'joined_at',
+            ])
+            ->withTimestamps();
     }
 
     // =========================================================
@@ -97,8 +97,8 @@ class User extends Authenticatable
             Role::class,
             'user_roles'
         )
-        ->withPivot('organization_id')
-        ->withTimestamps();
+            ->withPivot('organization_id')
+            ->withTimestamps();
     }
 
     // =========================================================
@@ -124,17 +124,27 @@ class User extends Authenticatable
         return $this->hasMany(Project::class, 'created_by');
     }
 
+    public function createdWorkflows(): HasMany
+    {
+        return $this->hasMany(WorkflowDefinition::class, 'created_by');
+    }
+
     public function projects(): BelongsToMany
     {
         return $this->belongsToMany(
             Project::class,
             'project_members'
         )
-        ->withPivot([
-            'role',
-            'joined_at',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'role',
+                'joined_at',
+            ])
+            ->withTimestamps();
+    }
+
+    public function projectDepartmentResponsibilities(): HasMany
+    {
+        return $this->hasMany(ProjectDepartmentResponsible::class);
     }
 
     // =========================================================
@@ -166,11 +176,11 @@ class User extends Authenticatable
             Task::class,
             'task_assignees'
         )
-        ->withPivot([
-            'assigned_by',
-            'assigned_at',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'assigned_by',
+                'assigned_at',
+            ])
+            ->withTimestamps();
     }
 
     // =========================================================
@@ -197,11 +207,11 @@ class User extends Authenticatable
             WorkSession::class,
             'session_members'
         )
-        ->withPivot([
-            'role',
-            'joined_at',
-        ])
-        ->withTimestamps();
+            ->withPivot([
+                'role',
+                'joined_at',
+            ])
+            ->withTimestamps();
     }
 
     // =========================================================

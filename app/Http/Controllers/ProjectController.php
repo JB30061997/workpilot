@@ -10,6 +10,8 @@ use App\Models\Project;
 use App\Models\ProjectCategory;
 use App\Models\User;
 use App\Services\ProjectWorkflowService;
+use App\Services\UniqueCodeGenerator;
+use App\Services\WorkContextDepartmentService;
 use App\Support\ProjectAccessAuthorizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -45,6 +47,8 @@ class ProjectController extends Controller
     public function __construct(
         private readonly ProjectAccessAuthorizer $projectAuthorizer,
         private readonly ProjectWorkflowService $workflowService,
+        private readonly UniqueCodeGenerator $codeGenerator,
+        private readonly WorkContextDepartmentService $departmentAccess,
     ) {}
 
     /**
@@ -86,19 +90,11 @@ class ProjectController extends Controller
         Request $request,
         Organization $organization
     ): Department {
-        $department = $request->user()
-            ->departments()
-            ->where(
-                'departments.organization_id',
-                $organization->id
-            )
-            ->wherePivot('is_active', true)
-            ->when(
-                session('current_department_id'),
-                fn ($query, $departmentId) => $query->whereKey($departmentId)
-            )
-            ->orderByDesc('department_members.is_primary')
-            ->first();
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($request->user(), $organization->id);
+        $department = session('current_department_id')
+            ? $departments->firstWhere('id', (int) session('current_department_id'))
+            : $departments->first();
 
         if (! $department && session()->has('current_department_id')) {
             session()->forget('current_department_id');
@@ -326,6 +322,127 @@ class ProjectController extends Controller
         }
 
         return $validIds->map(fn (int $departmentId): int => $departmentId)->all();
+    }
+
+    /**
+     * @param  array<int, int|string>  $memberIds
+     * @param  array<int|string, int|string>  $departmentResponsibles
+     * @param  array<int, int>  $departmentIds
+     * @return array{member_ids: array<int, int>, department_responsibles: array<int, int>}
+     */
+    private function validateProjectMemberships(
+        array $memberIds,
+        array $departmentResponsibles,
+        array $departmentIds,
+        Organization $organization,
+    ): array {
+        $members = collect($memberIds)
+            ->map(fn (int|string $userId): int => (int) $userId)
+            ->unique()
+            ->values();
+        $selectedDepartmentIds = collect($departmentIds)->map(fn (int $departmentId): int => $departmentId);
+
+        $validMemberIds = User::query()
+            ->whereIn('id', $members)
+            ->whereHas('organizations', fn ($query) => $query
+                ->whereKey($organization->id)
+                ->where('organization_members.is_active', true))
+            ->whereHas('departments', fn ($query) => $query
+                ->whereIn('departments.id', $selectedDepartmentIds)
+                ->where('department_members.is_active', true))
+            ->pluck('id');
+
+        if ($validMemberIds->count() !== $members->count()) {
+            throw ValidationException::withMessages([
+                'project_members' => 'Tous les membres doivent être actifs dans au moins un département sélectionné.',
+            ]);
+        }
+
+        $responsibles = [];
+
+        foreach ($departmentResponsibles as $departmentId => $userId) {
+            $departmentId = (int) $departmentId;
+            $userId = (int) $userId;
+
+            if (! $selectedDepartmentIds->contains($departmentId)) {
+                throw ValidationException::withMessages([
+                    'department_responsibles' => 'Chaque responsable doit appartenir à un département sélectionné.',
+                ]);
+            }
+
+            $isActiveDepartmentMember = User::query()
+                ->whereKey($userId)
+                ->whereHas('departments', fn ($query) => $query
+                    ->whereKey($departmentId)
+                    ->where('department_members.is_active', true))
+                ->whereHas('organizations', fn ($query) => $query
+                    ->whereKey($organization->id)
+                    ->where('organization_members.is_active', true))
+                ->exists();
+
+            if (! $members->contains($userId) || ! $isActiveDepartmentMember) {
+                throw ValidationException::withMessages([
+                    'department_responsibles' => 'Le responsable de chaque département doit être un membre actif sélectionné dans ce département.',
+                ]);
+            }
+
+            $responsibles[$departmentId] = $userId;
+        }
+
+        return [
+            'member_ids' => $members->all(),
+            'department_responsibles' => $responsibles,
+        ];
+    }
+
+    /**
+     * @param  array<int, int>  $memberIds
+     * @param  array<int, int>  $departmentResponsibles
+     */
+    private function syncProjectMemberships(
+        Project $project,
+        array $memberIds,
+        array $departmentResponsibles,
+    ): void {
+        $existingJoinedAt = $project->projectMembers()
+            ->pluck('joined_at', 'user_id');
+        $responsibleUserIds = collect($departmentResponsibles)->values();
+        $members = collect($memberIds)->mapWithKeys(fn (int $userId): array => [
+            $userId => [
+                'role' => $responsibleUserIds->contains($userId) ? 'manager' : 'member',
+                'joined_at' => $existingJoinedAt->get($userId) ?? now(),
+            ],
+        ]);
+
+        $project->members()->sync($members->all());
+        $project->departmentResponsibles()->delete();
+
+        if ($departmentResponsibles !== []) {
+            $project->departmentResponsibles()->createMany(
+                collect($departmentResponsibles)
+                    ->map(fn (int $userId, int $departmentId): array => [
+                        'department_id' => $departmentId,
+                        'user_id' => $userId,
+                    ])
+                    ->values()
+                    ->all()
+            );
+        }
+    }
+
+    private function appendProjectMembershipPayload(Project $project): Project
+    {
+        $project->setAttribute('project_members', $project->members->map(fn (User $user): array => [
+            'user_id' => $user->id,
+            'user' => $user->only(['id', 'name', 'email']),
+            'role' => $user->pivot->role,
+        ])->values());
+        $project->setAttribute(
+            'department_responsibles',
+            $project->departmentResponsibles->pluck('user_id', 'department_id')->all()
+        );
+
+        return $project;
     }
 
     private function resolveProjectCategory(
@@ -593,6 +710,8 @@ class ProjectController extends Controller
                 'category:id,organization_id,manager_id,name,slug',
                 'category.manager:id,name,email',
                 'departments:id,name,code',
+                'members:id,name,email',
+                'departmentResponsibles:id,project_id,department_id,user_id',
             ])
 
             ->withCount([
@@ -651,7 +770,7 @@ class ProjectController extends Controller
                 $context['department']->id,
             ));
 
-            return $project;
+            return $this->appendProjectMembershipPayload($project);
         });
 
         $payload = [
@@ -794,6 +913,12 @@ class ProjectController extends Controller
             'departments' => Department::query()
                 ->where('organization_id', $context['organization']->id)
                 ->where('is_active', true)
+                ->with(['users' => fn ($query) => $query
+                    ->wherePivot('is_active', true)
+                    ->whereHas('organizations', fn ($organizationQuery) => $organizationQuery
+                        ->whereKey($context['organization']->id)
+                        ->where('organization_members.is_active', true))
+                    ->orderBy('users.name')])
                 ->orderBy('name')
                 ->get(['id', 'name', 'code']),
             'projectCategories' => ProjectCategory::query()
@@ -832,12 +957,6 @@ class ProjectController extends Controller
                 'exists:axes,id',
             ],
 
-            'manager_id' => [
-                'nullable',
-                'integer',
-                'exists:users,id',
-            ],
-
             'project_category_id' => [
                 'nullable',
                 'integer',
@@ -848,7 +967,7 @@ class ProjectController extends Controller
                 'sometimes',
                 'required',
                 'array',
-                'min:2',
+                'min:1',
             ],
 
             'department_ids.*' => [
@@ -857,14 +976,13 @@ class ProjectController extends Controller
                 'exists:departments,id',
             ],
 
+            'project_members' => ['sometimes', 'array'],
+            'project_members.*' => ['integer', 'distinct', 'exists:users,id'],
+            'department_responsibles' => ['sometimes', 'array'],
+            'department_responsibles.*' => ['integer', 'exists:users,id'],
+
             'name' => [
                 'required',
-                'string',
-                'max:255',
-            ],
-
-            'code' => [
-                'nullable',
                 'string',
                 'max:255',
             ],
@@ -936,8 +1054,6 @@ class ProjectController extends Controller
                 : null
         );
 
-        $manager = null;
-
         $category = $this->resolveProjectCategory(
             $context['organization'],
             $request->user(),
@@ -948,6 +1064,14 @@ class ProjectController extends Controller
             $data['department_ids'] ?? [$context['department']->id],
             $context['organization'],
         );
+        $memberships = $this->validateProjectMemberships(
+            $data['project_members'] ?? [],
+            $data['department_responsibles'] ?? [],
+            $departmentIds,
+            $context['organization'],
+        );
+        $managerId = $memberships['department_responsibles'][$context['department']->id]
+            ?? collect($memberships['department_responsibles'])->first();
 
         $position = $data['position'] ?? ((int) Project::query()
             ->where('organization_id', $context['organization']->id)
@@ -955,22 +1079,16 @@ class ProjectController extends Controller
             ->where('axis_id', $structure['axis']?->id)
             ->max('position')) + 1;
 
-        if (! empty($data['manager_id'])) {
-            $manager = $this->findScopedUser(
-                $request,
-                (int) $data['manager_id']
-            );
-        }
-
         DB::transaction(function () use (
             $request,
             $context,
             $data,
             $structure,
-            $manager,
+            $managerId,
             $departmentIds,
             $category,
             $position,
+            $memberships,
         ) {
             $existingProject = ! empty($data['creation_token'])
                 ? Project::query()
@@ -994,7 +1112,7 @@ class ProjectController extends Controller
 
                 'project_category_id' => $category->id,
 
-                'manager_id' => $manager?->id,
+                'manager_id' => $managerId,
 
                 /*
                  * created_by is always controlled by backend.
@@ -1004,10 +1122,10 @@ class ProjectController extends Controller
 
                 'name' => trim($data['name']),
 
-                'code' => isset($data['code'])
-                    && trim($data['code']) !== ''
-                    ? trim($data['code'])
-                    : null,
+                'code' => $this->codeGenerator->forProject(
+                    trim($data['name']),
+                    $context['organization']->id,
+                ),
 
                 'description' => $data['description'] ?? null,
 
@@ -1029,6 +1147,11 @@ class ProjectController extends Controller
             ]);
 
             $project->departments()->sync($departmentIds);
+            $this->syncProjectMemberships(
+                $project,
+                $memberships['member_ids'],
+                $memberships['department_responsibles'],
+            );
 
             $this->workflowService->createDefaultActions($project, $request->user());
         });
@@ -1073,6 +1196,7 @@ class ProjectController extends Controller
                     ])
                     ->orderBy('users.name');
             },
+            'departmentResponsibles:id,project_id,department_id,user_id',
         ]);
 
         $project->loadCount([
@@ -1084,7 +1208,7 @@ class ProjectController extends Controller
         ]);
 
         return response()->json([
-            'project' => $project,
+            'project' => $this->appendProjectMembershipPayload($project),
         ]);
     }
 
@@ -1162,7 +1286,7 @@ class ProjectController extends Controller
                 'sometimes',
                 'required',
                 'array',
-                'min:2',
+                'min:1',
             ],
 
             'department_ids.*' => [
@@ -1170,6 +1294,11 @@ class ProjectController extends Controller
                 'distinct',
                 'exists:departments,id',
             ],
+
+            'project_members' => ['sometimes', 'array'],
+            'project_members.*' => ['integer', 'distinct', 'exists:users,id'],
+            'department_responsibles' => ['sometimes', 'array'],
+            'department_responsibles.*' => ['integer', 'exists:users,id'],
 
             'name' => [
                 'sometimes',
@@ -1364,17 +1493,53 @@ class ProjectController extends Controller
         $departmentIds = array_key_exists('department_ids', $data)
             ? $this->validateProjectDepartments($data['department_ids'], $context['organization'])
             : null;
+        $shouldSyncMemberships = $departmentIds !== null
+            || array_key_exists('project_members', $data)
+            || array_key_exists('department_responsibles', $data);
+        $finalDepartmentIds = $departmentIds ?? $project->departments()
+            ->pluck('departments.id')
+            ->map(fn (int $departmentId): int => $departmentId)
+            ->all();
+
+        if ($finalDepartmentIds === [] && $project->department_id !== null) {
+            $finalDepartmentIds = [(int) $project->department_id];
+        }
+
+        $memberships = null;
+
+        if ($shouldSyncMemberships) {
+            $project->loadMissing('departmentResponsibles');
+            $memberships = $this->validateProjectMemberships(
+                $data['project_members'] ?? $project->members()->pluck('users.id')->all(),
+                $data['department_responsibles'] ?? $project->departmentResponsibles
+                    ->pluck('user_id', 'department_id')
+                    ->all(),
+                $finalDepartmentIds,
+                $context['organization'],
+            );
+        }
+
         unset($data['department_ids']);
+        unset($data['project_members'], $data['department_responsibles']);
 
         DB::transaction(function () use (
             $project,
             $data,
             $departmentIds,
+            $memberships,
         ) {
             $project->update($data);
 
             if ($departmentIds !== null) {
                 $project->departments()->sync($departmentIds);
+            }
+
+            if ($memberships !== null) {
+                $this->syncProjectMemberships(
+                    $project,
+                    $memberships['member_ids'],
+                    $memberships['department_responsibles'],
+                );
             }
         });
 

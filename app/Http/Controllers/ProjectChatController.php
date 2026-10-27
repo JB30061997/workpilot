@@ -6,6 +6,7 @@ use App\Models\Project;
 use App\Models\ProjectChatAttachment;
 use App\Models\ProjectChatMessage;
 use App\Models\ProjectChatRead;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -305,6 +306,62 @@ class ProjectChatController extends Controller
     }
 
     /**
+     * Supprimer un message envoyé tant qu'aucun autre membre ne l'a lu.
+     */
+    public function destroy(
+        Request $request,
+        Project $project,
+        ProjectChatMessage $message
+    ): JsonResponse {
+        $this->authorizeProject($request, $project);
+
+        abort_unless((int) $message->project_id === (int) $project->id, 404);
+        abort_unless(
+            (int) $message->user_id === (int) $request->user()->id,
+            403,
+            'Vous pouvez uniquement supprimer vos propres messages.'
+        );
+
+        $storedFiles = DB::transaction(function () use ($message): array {
+            $lockedMessage = ProjectChatMessage::query()
+                ->lockForUpdate()
+                ->findOrFail($message->id);
+
+            $hasBeenRead = ProjectChatRead::query()
+                ->where('project_id', $lockedMessage->project_id)
+                ->where('user_id', '<>', $lockedMessage->user_id)
+                ->where('last_read_message_id', '>=', $lockedMessage->id)
+                ->lockForUpdate()
+                ->exists();
+
+            if ($hasBeenRead) {
+                throw ValidationException::withMessages([
+                    'message' => 'Ce message a déjà été lu et ne peut plus être supprimé.',
+                ]);
+            }
+
+            $storedFiles = $lockedMessage->attachments()
+                ->get()
+                ->map(fn (ProjectChatAttachment $attachment): array => [
+                    'disk' => $attachment->disk,
+                    'path' => $attachment->path,
+                ])
+                ->all();
+
+            $lockedMessage->attachments()->delete();
+            $lockedMessage->delete();
+
+            return $storedFiles;
+        });
+
+        foreach ($storedFiles as $file) {
+            Storage::disk($file['disk'])->delete($file['path']);
+        }
+
+        return response()->json(['message' => 'Message supprimé.']);
+    }
+
+    /**
      * Marquer les messages comme lus.
      */
     public function markRead(
@@ -374,7 +431,7 @@ class ProjectChatController extends Controller
     public function download(
         Request $request,
         ProjectChatAttachment $attachment
-    ): StreamedResponse {
+    ): JsonResponse|StreamedResponse {
         $message = $attachment->message;
 
         abort_unless(
@@ -405,6 +462,28 @@ class ProjectChatController extends Controller
             'image/png',
             'image/webp',
         ];
+
+        if (
+            $request->boolean('data_url')
+            && in_array(strtolower((string) $attachment->mime_type), $allowedImageTypes, true)
+        ) {
+            abort_if(
+                $disk->size($attachment->path) > 15 * 1024 * 1024,
+                413,
+                'Cette image est trop volumineuse pour l’aperçu.'
+            );
+
+            return response()->json([
+                'data_url' => sprintf(
+                    'data:%s;base64,%s',
+                    $attachment->mime_type,
+                    base64_encode($disk->get($attachment->path))
+                ),
+            ], 200, [
+                'Cache-Control' => 'private, max-age=3600',
+                'X-Content-Type-Options' => 'nosniff',
+            ]);
+        }
 
         if (
             $request->boolean('preview')

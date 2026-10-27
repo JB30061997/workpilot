@@ -4,7 +4,7 @@ import AppIcon from "@/Components/AppIcon.vue";
 import Modal from "@/Components/Modal.vue";
 import { useSweetAlert } from "@/Composables/useSweetAlert";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
-import { Head, Link, router, useForm } from "@inertiajs/vue3";
+import { Head, Link, router, useForm, usePage } from "@inertiajs/vue3";
 import {
     ChevronDown,
     ChevronUp,
@@ -13,9 +13,11 @@ import {
     Eye,
     EyeOff,
     LoaderCircle,
+    MessageCircleMore,
     MoveVertical,
     Plus,
     Table2,
+    Workflow,
 } from "lucide-vue-next";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
@@ -37,6 +39,14 @@ const props = defineProps({
 });
 
 const { confirmAction } = useSweetAlert();
+const page = usePage();
+const currentUserId = computed(() => page.props.auth?.user?.id ?? null);
+const canAccessProjectChat = (project) =>
+    (project.project_members ?? project.members ?? []).some(
+        (member) =>
+            String(member.user_id ?? member.user?.id ?? member.id) ===
+            String(currentUserId.value),
+    );
 
 const isFormOpen = ref(false);
 const editingProject = ref(null);
@@ -51,7 +61,8 @@ const isSavingInlineAction = ref(false);
 const workspaceViewMode = ref("table");
 const planningDateMode = ref("planned");
 const millisecondsPerDay = 86_400_000;
-const dateKey = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const dateKey = (date) =>
+    `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 const parsePlanningDate = (value) => {
     if (!value) {
         return null;
@@ -61,16 +72,28 @@ const parsePlanningDate = (value) => {
 
     return new Date(year, month - 1, day);
 };
-const addPlanningDays = (date, days) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
+const addPlanningDays = (date, days) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
 const actionRange = (action) => {
-    const start = dateInputValue(planningDateMode.value === "planned" ? action.start_date : action.actual_start_date);
-    const end = dateInputValue(planningDateMode.value === "planned" ? action.due_date : action.actual_end_date);
+    const start = dateInputValue(
+        planningDateMode.value === "planned"
+            ? action.start_date
+            : action.actual_start_date,
+    );
+    const end = dateInputValue(
+        planningDateMode.value === "planned"
+            ? action.due_date
+            : action.actual_end_date,
+    );
     return { start, end };
 };
-const planningActionCount = computed(() => (selectedWorkspaceProject.value?.actions || []).filter(a => {
-    const { start, end } = actionRange(a);
-    return Boolean(start || end);
-}).length);
+const planningActionCount = computed(
+    () =>
+        (selectedWorkspaceProject.value?.actions || []).filter((a) => {
+            const { start, end } = actionRange(a);
+            return Boolean(start || end);
+        }).length,
+);
 const planningRange = computed(() => {
     const dates = (selectedWorkspaceProject.value?.actions || [])
         .flatMap((action) => Object.values(actionRange(action)))
@@ -82,7 +105,9 @@ const planningRange = computed(() => {
         return null;
     }
 
-    const firstDate = new Date(Math.min(...dates.map((date) => date.getTime())));
+    const firstDate = new Date(
+        Math.min(...dates.map((date) => date.getTime())),
+    );
     const lastDate = new Date(Math.max(...dates.map((date) => date.getTime())));
 
     return {
@@ -95,9 +120,16 @@ const planningDayCount = computed(() => {
         return 0;
     }
 
-    return Math.round((planningRange.value.end - planningRange.value.start) / millisecondsPerDay) + 1;
+    return (
+        Math.round(
+            (planningRange.value.end - planningRange.value.start) /
+                millisecondsPerDay,
+        ) + 1
+    );
 });
-const planningScale = computed(() => planningDayCount.value > 120 ? "week" : "day");
+const planningScale = computed(() =>
+    planningDayCount.value > 120 ? "week" : "day",
+);
 const planningPeriods = computed(() => {
     if (!planningRange.value) {
         return [];
@@ -106,10 +138,19 @@ const planningPeriods = computed(() => {
     const periodLength = planningScale.value === "week" ? 7 : 1;
     const periods = [];
 
-    for (let date = new Date(planningRange.value.start); date <= planningRange.value.end; date = addPlanningDays(date, periodLength)) {
+    for (
+        let date = new Date(planningRange.value.start);
+        date <= planningRange.value.end;
+        date = addPlanningDays(date, periodLength)
+    ) {
         periods.push({
             start: new Date(date),
-            end: new Date(Math.min(addPlanningDays(date, periodLength - 1).getTime(), planningRange.value.end.getTime())),
+            end: new Date(
+                Math.min(
+                    addPlanningDays(date, periodLength - 1).getTime(),
+                    planningRange.value.end.getTime(),
+                ),
+            ),
         });
     }
 
@@ -119,7 +160,7 @@ const planningGridStyle = computed(() => ({
     gridTemplateColumns: `320px repeat(${planningPeriods.value.length}, ${planningScale.value === "week" ? "64px" : "34px"})`,
 }));
 const planningTimelineStyle = computed(() => ({
-    minWidth: `${320 + (planningPeriods.value.length * (planningScale.value === "week" ? 64 : 34))}px`,
+    minWidth: `${320 + planningPeriods.value.length * (planningScale.value === "week" ? 64 : 34)}px`,
 }));
 const planningRangeLabel = computed(() => {
     if (!planningRange.value) {
@@ -128,13 +169,24 @@ const planningRangeLabel = computed(() => {
 
     return `${formatDate(dateKey(addPlanningDays(planningRange.value.start, 1)))} → ${formatDate(dateKey(addPlanningDays(planningRange.value.end, -1)))}`;
 });
-const planningPeriodLabel = (period) => planningScale.value === "week"
-    ? new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "short" }).format(period.start)
-    : new Intl.DateTimeFormat("fr-FR", { day: "2-digit", month: "2-digit" }).format(period.start);
-const planningPeriodCaption = (period) => planningScale.value === "week"
-    ? "Sem."
-    : new Intl.DateTimeFormat("fr-FR", { weekday: "short" }).format(period.start).slice(0, 2);
-const planningPeriodIsToday = (period) => new Date() >= period.start && new Date() <= addPlanningDays(period.end, 1);
+const planningPeriodLabel = (period) =>
+    planningScale.value === "week"
+        ? new Intl.DateTimeFormat("fr-FR", {
+              day: "2-digit",
+              month: "short",
+          }).format(period.start)
+        : new Intl.DateTimeFormat("fr-FR", {
+              day: "2-digit",
+              month: "2-digit",
+          }).format(period.start);
+const planningPeriodCaption = (period) =>
+    planningScale.value === "week"
+        ? "Sem."
+        : new Intl.DateTimeFormat("fr-FR", { weekday: "short" })
+              .format(period.start)
+              .slice(0, 2);
+const planningPeriodIsToday = (period) =>
+    new Date() >= period.start && new Date() <= addPlanningDays(period.end, 1);
 const actionPlanningSpan = (action) => {
     const { start, end } = actionRange(action);
 
@@ -146,8 +198,12 @@ const actionPlanningSpan = (action) => {
     const rangeEnd = parsePlanningDate(end || start);
     const normalizedStart = rangeStart <= rangeEnd ? rangeStart : rangeEnd;
     const normalizedEnd = rangeStart <= rangeEnd ? rangeEnd : rangeStart;
-    const startIndex = planningPeriods.value.findIndex((period) => period.end >= normalizedStart);
-    const endIndex = planningPeriods.value.findLastIndex((period) => period.start <= normalizedEnd);
+    const startIndex = planningPeriods.value.findIndex(
+        (period) => period.end >= normalizedStart,
+    );
+    const endIndex = planningPeriods.value.findLastIndex(
+        (period) => period.start <= normalizedEnd,
+    );
 
     if (startIndex < 0 || endIndex < 0) {
         return null;
@@ -207,12 +263,12 @@ watch(
 const projectForm = useForm({
     creation_token: crypto.randomUUID(),
     name: "",
-    code: "",
     description: "",
     action_plan_id: "",
     axis_id: "",
-    manager_id: "",
     department_ids: [props.department.id],
+    project_members: [],
+    department_responsibles: {},
     project_category_id: "",
     start_date: "",
     due_date: "",
@@ -223,6 +279,89 @@ const projectForm = useForm({
     is_private: false,
     is_active: true,
 });
+
+// Membres et responsables par département.
+const memberSearch = ref("");
+const departmentUsers = (department) => {
+    const source = department.users ?? department.members ?? [];
+    return source
+        .map((entry) => entry.user ?? entry)
+        .filter((user) => user?.id != null);
+};
+const selectedDepartments = computed(() =>
+    (props.departments ?? []).filter((department) =>
+        projectForm.department_ids.some(
+            (id) => String(id) === String(department.id),
+        ),
+    ),
+);
+const filteredDepartmentUsers = (department) =>
+    departmentUsers(department).filter((user) =>
+        String(user.name ?? "")
+            .toLocaleLowerCase("fr")
+            .includes(memberSearch.value.toLocaleLowerCase("fr")),
+    );
+const isProjectMember = (id) =>
+    projectForm.project_members.some(
+        (memberId) => String(memberId) === String(id),
+    );
+const toggleProjectMember = (id) => {
+    if (isProjectMember(id)) {
+        projectForm.project_members = projectForm.project_members.filter(
+            (memberId) => String(memberId) !== String(id),
+        );
+        Object.keys(projectForm.department_responsibles).forEach(
+            (departmentId) => {
+                if (
+                    String(
+                        projectForm.department_responsibles[departmentId],
+                    ) === String(id)
+                ) {
+                    delete projectForm.department_responsibles[departmentId];
+                }
+            },
+        );
+    } else {
+        projectForm.project_members = [...projectForm.project_members, id];
+    }
+};
+const toggleDepartmentResponsible = (departmentId, userId) => {
+    const key = String(departmentId);
+    if (String(projectForm.department_responsibles[key]) === String(userId)) {
+        delete projectForm.department_responsibles[key];
+    } else {
+        if (!isProjectMember(userId))
+            projectForm.project_members = [
+                ...projectForm.project_members,
+                userId,
+            ];
+        projectForm.department_responsibles[key] = userId;
+    }
+};
+watch(
+    () => [...projectForm.department_ids],
+    () => {
+        const valid = new Set(
+            selectedDepartments.value.flatMap((department) =>
+                departmentUsers(department).map((user) => String(user.id)),
+            ),
+        );
+        projectForm.project_members = projectForm.project_members.filter((id) =>
+            valid.has(String(id)),
+        );
+        Object.keys(projectForm.department_responsibles).forEach(
+            (departmentId) => {
+                if (
+                    !selectedDepartments.value.some(
+                        (department) => String(department.id) === departmentId,
+                    )
+                ) {
+                    delete projectForm.department_responsibles[departmentId];
+                }
+            },
+        );
+    },
+);
 
 const actionForm = useForm({
     project_id: "",
@@ -425,23 +564,28 @@ const closeWorkspace = () => {
 
 const safeProgress = (value) => Math.min(100, Math.max(0, Number(value) || 0));
 const startInlineActionEdit = (action, field) => {
-    if (!selectedWorkspaceProject.value?.can_manage || isSavingInlineAction.value) {
+    if (
+        !selectedWorkspaceProject.value?.can_manage ||
+        isSavingInlineAction.value
+    ) {
         return;
     }
 
     inlineActionEdit.value = {
         actionId: action.id,
         field,
-        value: field === "progress"
-            ? safeProgress(action.progress)
-            : field.includes("date")
-                ? dateInputValue(action[field])
-                : action[field],
+        value:
+            field === "progress"
+                ? safeProgress(action.progress)
+                : field.includes("date")
+                  ? dateInputValue(action[field])
+                  : action[field],
         error: "",
     };
 };
-const isInlineActionEditing = (action, field) => inlineActionEdit.value?.actionId === action.id
-    && inlineActionEdit.value?.field === field;
+const isInlineActionEditing = (action, field) =>
+    inlineActionEdit.value?.actionId === action.id &&
+    inlineActionEdit.value?.field === field;
 const cancelInlineActionEdit = () => {
     if (!isSavingInlineAction.value) {
         inlineActionEdit.value = null;
@@ -454,16 +598,33 @@ const saveInlineActionEdit = (action) => {
         return;
     }
 
-    const data = { [edit.field]: edit.field === "progress" ? safeProgress(edit.value) : edit.value || null };
+    const data = {
+        [edit.field]:
+            edit.field === "progress"
+                ? safeProgress(edit.value)
+                : edit.value || null,
+    };
 
     if (["start_date", "due_date"].includes(edit.field)) {
-        data.start_date = edit.field === "start_date" ? data.start_date : dateInputValue(action.start_date) || null;
-        data.due_date = edit.field === "due_date" ? data.due_date : dateInputValue(action.due_date) || null;
+        data.start_date =
+            edit.field === "start_date"
+                ? data.start_date
+                : dateInputValue(action.start_date) || null;
+        data.due_date =
+            edit.field === "due_date"
+                ? data.due_date
+                : dateInputValue(action.due_date) || null;
     }
 
     if (["actual_start_date", "actual_end_date"].includes(edit.field)) {
-        data.actual_start_date = edit.field === "actual_start_date" ? data.actual_start_date : dateInputValue(action.actual_start_date) || null;
-        data.actual_end_date = edit.field === "actual_end_date" ? data.actual_end_date : dateInputValue(action.actual_end_date) || null;
+        data.actual_start_date =
+            edit.field === "actual_start_date"
+                ? data.actual_start_date
+                : dateInputValue(action.actual_start_date) || null;
+        data.actual_end_date =
+            edit.field === "actual_end_date"
+                ? data.actual_end_date
+                : dateInputValue(action.actual_end_date) || null;
     }
 
     isSavingInlineAction.value = true;
@@ -476,7 +637,10 @@ const saveInlineActionEdit = (action) => {
             inlineActionEdit.value = null;
         },
         onError: (errors) => {
-            edit.error = errors[edit.field] || Object.values(errors)[0] || "La modification n’a pas pu être enregistrée.";
+            edit.error =
+                errors[edit.field] ||
+                Object.values(errors)[0] ||
+                "La modification n’a pas pu être enregistrée.";
         },
         onFinish: () => {
             isSavingInlineAction.value = false;
@@ -630,6 +794,9 @@ const resetProjectForm = () => {
     projectForm.priority = "medium";
     projectForm.position = 1;
     projectForm.department_ids = [props.department.id];
+    projectForm.project_members = [];
+    projectForm.department_responsibles = {};
+    memberSearch.value = "";
     projectForm.project_category_id = props.projectCategories[0]?.id ?? "";
     projectForm.progress_value = 0;
     projectForm.is_private = false;
@@ -647,16 +814,24 @@ const openEditForm = (project) => {
     editingProject.value = project;
     projectForm.clearErrors();
     projectForm.name = project.name ?? "";
-    projectForm.code = project.code ?? "";
     projectForm.description = project.description ?? "";
     projectForm.action_plan_id = project.action_plan_id ?? "";
     projectForm.axis_id = project.axis_id ?? "";
-    projectForm.manager_id = project.manager_id ?? "";
     projectForm.project_category_id = project.project_category_id ?? "";
-    projectForm.department_ids = (project.departments?.length
-        ? project.departments
-        : [props.department]
+    projectForm.department_ids = (
+        project.departments?.length ? project.departments : [props.department]
     ).map((department) => department.id);
+    projectForm.project_members = (
+        project.project_members ??
+        project.members ??
+        []
+    )
+        .map((member) => member.user_id ?? member.user?.id ?? member.id)
+        .filter((id) => id != null);
+    projectForm.department_responsibles = {
+        ...(project.department_responsibles ?? {}),
+    };
+    memberSearch.value = "";
     projectForm.start_date = dateInputValue(project.start_date);
     projectForm.due_date = dateInputValue(project.due_date);
     projectForm.status = project.status;
@@ -702,7 +877,8 @@ const applyFilters = () => {
 
 const sortBy = (column) => {
     if (filtersForm.sort === column) {
-        filtersForm.direction = filtersForm.direction === "asc" ? "desc" : "asc";
+        filtersForm.direction =
+            filtersForm.direction === "asc" ? "desc" : "asc";
     } else {
         filtersForm.sort = column;
         filtersForm.direction = "asc";
@@ -1035,9 +1211,14 @@ const duplicateProject = (project) => {
                                 </option>
                             </select></label
                         >
-                        <label class="w-full text-xs font-semibold text-slate-600 sm:w-56">
+                        <label
+                            class="w-full text-xs font-semibold text-slate-600 sm:w-56"
+                        >
                             Catégorie
-                            <select v-model="filtersForm.project_category_id" class="wp-field mt-1">
+                            <select
+                                v-model="filtersForm.project_category_id"
+                                class="wp-field mt-1"
+                            >
                                 <option value="">Toutes les catégories</option>
                                 <option
                                     v-for="category in projectCategories"
@@ -1069,13 +1250,20 @@ const duplicateProject = (project) => {
                         >
                             <p class="font-semibold text-blue-800">
                                 <template v-if="canReorderProjects">
-                                    Glissez les projets pour modifier leur priorité dans cette catégorie.
+                                    Glissez les projets pour modifier leur
+                                    priorité dans cette catégorie.
                                 </template>
-                                <template v-else-if="!selectedReorderCategoryId">
-                                    Sélectionnez d’abord une catégorie puis cliquez sur Filtrer pour activer le classement.
+                                <template
+                                    v-else-if="!selectedReorderCategoryId"
+                                >
+                                    Sélectionnez d’abord une catégorie puis
+                                    cliquez sur Filtrer pour activer le
+                                    classement.
                                 </template>
                                 <template v-else>
-                                    Gardez uniquement la catégorie et triez la priorité par ordre croissant pour réorganiser.
+                                    Gardez uniquement la catégorie et triez la
+                                    priorité par ordre croissant pour
+                                    réorganiser.
                                 </template>
                             </p>
                             <span
@@ -1086,7 +1274,9 @@ const duplicateProject = (project) => {
                                 Enregistrement…
                             </span>
                         </div>
-                        <table class="wp-table w-[2250px] min-w-[2250px] table-fixed">
+                        <table
+                            class="wp-table w-[2320px] min-w-[2320px] table-fixed"
+                        >
                             <colgroup>
                                 <col class="w-[130px]" />
                                 <col class="w-[250px]" />
@@ -1100,24 +1290,168 @@ const duplicateProject = (project) => {
                                 <col class="w-[180px]" />
                                 <col class="w-[140px]" />
                                 <col class="w-[90px]" />
-                                <col class="w-[170px]" />
+                                <col class="w-[240px]" />
                             </colgroup>
                             <thead>
                                 <tr>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('position')">Priorité <component :is="sortIcon('position')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('name')">Projet <component :is="sortIcon('name')" class="wp-sort-icon" /></button></th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('position')"
+                                        >
+                                            Priorité
+                                            <component
+                                                :is="sortIcon('position')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('name')"
+                                        >
+                                            Projet
+                                            <component
+                                                :is="sortIcon('name')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
                                     <!-- <th>Code Projet</th> -->
-                                    <th><button type="button" class="wp-sort" @click="sortBy('action_plan')">Plan d’action <component :is="sortIcon('action_plan')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('axis')">Établissement <component :is="sortIcon('axis')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('departments')">Départements <component :is="sortIcon('departments')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('category')">Catégorie <component :is="sortIcon('category')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('manager')">Responsable <component :is="sortIcon('manager')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('status')">Statut <component :is="sortIcon('status')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('priority')">Niveau <component :is="sortIcon('priority')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('progress')">Progression <component :is="sortIcon('progress')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('due_date')">Échéance <component :is="sortIcon('due_date')" class="wp-sort-icon" /></button></th>
-                                    <th><button type="button" class="wp-sort" @click="sortBy('actions_count')">Actions <component :is="sortIcon('actions_count')" class="wp-sort-icon" /></button></th>
-                                    <th class="text-right">Gestion</th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('action_plan')"
+                                        >
+                                            Plan d’action
+                                            <component
+                                                :is="sortIcon('action_plan')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('axis')"
+                                        >
+                                            Établissement
+                                            <component
+                                                :is="sortIcon('axis')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('departments')"
+                                        >
+                                            Départements
+                                            <component
+                                                :is="sortIcon('departments')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('category')"
+                                        >
+                                            Catégorie
+                                            <component
+                                                :is="sortIcon('category')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('manager')"
+                                        >
+                                            Responsable
+                                            <component
+                                                :is="sortIcon('manager')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('status')"
+                                        >
+                                            Statut
+                                            <component
+                                                :is="sortIcon('status')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('priority')"
+                                        >
+                                            Niveau
+                                            <component
+                                                :is="sortIcon('priority')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('progress')"
+                                        >
+                                            Progression
+                                            <component
+                                                :is="sortIcon('progress')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('due_date')"
+                                        >
+                                            Échéance
+                                            <component
+                                                :is="sortIcon('due_date')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th>
+                                        <button
+                                            type="button"
+                                            class="wp-sort"
+                                            @click="sortBy('actions_count')"
+                                        >
+                                            Actions
+                                            <component
+                                                :is="sortIcon('actions_count')"
+                                                class="wp-sort-icon"
+                                            />
+                                        </button>
+                                    </th>
+                                    <th class="pr-5 text-right">Gestion</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1126,15 +1460,20 @@ const duplicateProject = (project) => {
                                     :key="project.id"
                                     class="transition-colors"
                                     :class="[
-                                        Number(draggedProjectId) === Number(project.id)
+                                        Number(draggedProjectId) ===
+                                        Number(project.id)
                                             ? 'bg-blue-100/80 opacity-60'
                                             : '',
-                                        Number(dragOverProjectId) === Number(project.id) &&
-                                        Number(draggedProjectId) !== Number(project.id)
+                                        Number(dragOverProjectId) ===
+                                            Number(project.id) &&
+                                        Number(draggedProjectId) !==
+                                            Number(project.id)
                                             ? 'border-t-2 border-blue-500'
                                             : '',
                                     ]"
-                                    @dragover.prevent="moveDraggedProject(project)"
+                                    @dragover.prevent="
+                                        moveDraggedProject(project)
+                                    "
                                     @drop.prevent="saveProjectOrder"
                                 >
                                     <td class="font-bold text-blue-700">
@@ -1142,16 +1481,42 @@ const duplicateProject = (project) => {
                                             <button
                                                 type="button"
                                                 class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-blue-200 bg-blue-50 text-blue-600 shadow-sm transition"
-                                                :class="canReorderProjects && !isSavingProjectOrder ? 'cursor-grab hover:border-blue-400 hover:bg-blue-100 hover:text-blue-800 active:cursor-grabbing' : 'cursor-not-allowed opacity-40'"
-                                                :draggable="canReorderProjects && !isSavingProjectOrder"
-                                                :title="canReorderProjects ? 'Glisser pour modifier la priorité' : 'Sélectionnez une catégorie pour réorganiser'"
+                                                :class="
+                                                    canReorderProjects &&
+                                                    !isSavingProjectOrder
+                                                        ? 'cursor-grab hover:border-blue-400 hover:bg-blue-100 hover:text-blue-800 active:cursor-grabbing'
+                                                        : 'cursor-not-allowed opacity-40'
+                                                "
+                                                :draggable="
+                                                    canReorderProjects &&
+                                                    !isSavingProjectOrder
+                                                "
+                                                :title="
+                                                    canReorderProjects
+                                                        ? 'Glisser pour modifier la priorité'
+                                                        : 'Sélectionnez une catégorie pour réorganiser'
+                                                "
                                                 aria-label="Glisser pour modifier la priorité"
-                                                @dragstart="startProjectDrag($event, project)"
-                                                @dragend="draggedProjectId !== null ? cancelProjectDrag() : null"
+                                                @dragstart="
+                                                    startProjectDrag(
+                                                        $event,
+                                                        project,
+                                                    )
+                                                "
+                                                @dragend="
+                                                    draggedProjectId !== null
+                                                        ? cancelProjectDrag()
+                                                        : null
+                                                "
                                             >
-                                                <MoveVertical class="h-4 w-4" :stroke-width="2.25" />
+                                                <MoveVertical
+                                                    class="h-4 w-4"
+                                                    :stroke-width="2.25"
+                                                />
                                             </button>
-                                            <span>{{ project.position || "—" }}</span>
+                                            <span>{{
+                                                project.position || "—"
+                                            }}</span>
                                         </div>
                                     </td>
                                     <td>
@@ -1192,12 +1557,23 @@ const duplicateProject = (project) => {
                                                 v-for="projectDepartment in project.departments"
                                                 :key="projectDepartment.id"
                                                 class="rounded-full bg-cyan-50 px-2 py-1 text-[10px] font-bold text-cyan-800"
-                                            >{{ projectDepartment.name }}</span>
+                                                >{{
+                                                    projectDepartment.name
+                                                }}</span
+                                            >
                                         </div>
                                     </td>
                                     <td>
-                                        <p class="font-semibold text-slate-800">{{ project.category?.name || "—" }}</p>
-                                        <p class="text-[10px] text-slate-500">Chef : {{ project.category?.manager?.name || "—" }}</p>
+                                        <p class="font-semibold text-slate-800">
+                                            {{ project.category?.name || "—" }}
+                                        </p>
+                                        <p class="text-[10px] text-slate-500">
+                                            Chef :
+                                            {{
+                                                project.category?.manager
+                                                    ?.name || "—"
+                                            }}
+                                        </p>
                                     </td>
                                     <td>
                                         <div
@@ -1273,11 +1649,15 @@ const duplicateProject = (project) => {
                                     >
                                         {{ formatDate(project.due_date) }}
                                     </td>
-                                    <td class="text-center font-bold text-slate-700">
+                                    <td
+                                        class="text-center font-bold text-slate-700"
+                                    >
                                         {{ project.actions_count }}
                                     </td>
-                                    <td class="min-w-[142px]">
-                                        <div class="flex justify-end gap-1">
+                                    <td class="min-w-[240px] pr-5">
+                                        <div
+                                            class="flex flex-nowrap items-center justify-end gap-1.5"
+                                        >
                                             <button
                                                 type="button"
                                                 class="wp-icon-btn text-blue-700"
@@ -1291,6 +1671,39 @@ const duplicateProject = (project) => {
                                                     :stroke-width="2"
                                                 />
                                             </button>
+                                            <Link
+                                                :href="
+                                                    route(
+                                                        'workflows.index',
+                                                        project.id,
+                                                    )
+                                                "
+                                                class="wp-icon-btn text-cyan-700"
+                                                title="Workflows et processus"
+                                                aria-label="Workflows et processus"
+                                            >
+                                                <Workflow
+                                                    class="h-4 w-4"
+                                                    :stroke-width="2"
+                                                />
+                                            </Link>
+                                            <Link
+                                                v-if="canAccessProjectChat(project)"
+                                                :href="
+                                                    route('project-chat.index', {
+                                                        project: project.id,
+                                                    })
+                                                "
+                                                prefetch
+                                                class="wp-icon-btn text-emerald-700"
+                                                title="Démarrer le chat"
+                                                aria-label="Démarrer le chat"
+                                            >
+                                                <MessageCircleMore
+                                                    class="h-4 w-4"
+                                                    :stroke-width="2"
+                                                />
+                                            </Link>
                                             <button
                                                 v-if="project.can_manage"
                                                 type="button"
@@ -1502,9 +1915,7 @@ const duplicateProject = (project) => {
                 <div
                     class="min-h-0 flex-1 overflow-y-auto bg-slate-50 px-3 py-4 sm:px-6"
                 >
-                    <div
-                        class="mb-3 flex flex-wrap items-center gap-2"
-                    >
+                    <div class="mb-3 flex flex-wrap items-center gap-2">
                         <div class="relative min-w-[280px] flex-1">
                             <button
                                 type="button"
@@ -1587,12 +1998,32 @@ const duplicateProject = (project) => {
                             </option>
                         </select>
                         <div class="ml-auto flex flex-wrap items-center gap-2">
-                            <div class="inline-flex rounded-[4px] border border-slate-200 bg-white p-1">
-                                <button type="button" class="inline-flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 text-xs font-semibold" :class="workspaceViewMode === 'table' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="workspaceViewMode = 'table'">
+                            <div
+                                class="inline-flex rounded-[4px] border border-slate-200 bg-white p-1"
+                            >
+                                <button
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 text-xs font-semibold"
+                                    :class="
+                                        workspaceViewMode === 'table'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'text-slate-600 hover:bg-slate-100'
+                                    "
+                                    @click="workspaceViewMode = 'table'"
+                                >
                                     <Table2 class="h-3.5 w-3.5" />
                                     Tableau
                                 </button>
-                                <button type="button" class="inline-flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 text-xs font-semibold" :class="workspaceViewMode === 'planning' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'" @click="workspaceViewMode = 'planning'">
+                                <button
+                                    type="button"
+                                    class="inline-flex items-center gap-1.5 rounded-[3px] px-3 py-1.5 text-xs font-semibold"
+                                    :class="
+                                        workspaceViewMode === 'planning'
+                                            ? 'bg-blue-600 text-white'
+                                            : 'text-slate-600 hover:bg-slate-100'
+                                    "
+                                    @click="workspaceViewMode = 'planning'"
+                                >
                                     <CalendarDays class="h-3.5 w-3.5" />
                                     Planning
                                 </button>
@@ -1655,52 +2086,115 @@ const duplicateProject = (project) => {
                             </div>
                         </div>
                         <div class="mb-2">
-                            <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div
+                                class="flex flex-wrap items-center justify-between gap-2"
+                            >
                                 <h3 class="text-sm font-bold text-slate-900">
                                     Actions du projet
-                                    <span class="ml-1 text-slate-500">({{ workspaceActionCount }})</span>
+                                    <span class="ml-1 text-slate-500"
+                                        >({{ workspaceActionCount }})</span
+                                    >
                                 </h3>
-                                <p v-if="selectedWorkspaceProject.can_manage && workspaceViewMode === 'table'" class="text-[11px] text-slate-500">
-                                    Double-cliquez sur un statut, une date ou la progression · Entrée pour enregistrer
+                                <p
+                                    v-if="
+                                        selectedWorkspaceProject.can_manage &&
+                                        workspaceViewMode === 'table'
+                                    "
+                                    class="text-[11px] text-slate-500"
+                                >
+                                    Double-cliquez sur un statut, une date ou la
+                                    progression · Entrée pour enregistrer
                                 </p>
                             </div>
                         </div>
-                        <div v-if="workspaceViewMode === 'planning'" class="mb-3 overflow-hidden rounded-[4px] border border-slate-200 bg-white shadow-sm">
-                            <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
+                        <div
+                            v-if="workspaceViewMode === 'planning'"
+                            class="mb-3 overflow-hidden rounded-[4px] border border-slate-200 bg-white shadow-sm"
+                        >
+                            <div
+                                class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3"
+                            >
                                 <div>
-                                    <h4 class="text-sm font-bold text-slate-900">Planning complet des actions</h4>
+                                    <h4
+                                        class="text-sm font-bold text-slate-900"
+                                    >
+                                        Planning complet des actions
+                                    </h4>
                                     <p class="mt-0.5 text-xs text-slate-500">
-                                        {{ planningActionCount }} action(s) positionnée(s) · {{ planningRangeLabel }}
+                                        {{ planningActionCount }} action(s)
+                                        positionnée(s) ·
+                                        {{ planningRangeLabel }}
                                     </p>
                                 </div>
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <span v-if="planningRange" class="rounded-[4px] bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600">
-                                        Vue {{ planningScale === 'day' ? 'journalière' : 'hebdomadaire' }}
+                                    <span
+                                        v-if="planningRange"
+                                        class="rounded-[4px] bg-slate-100 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600"
+                                    >
+                                        Vue
+                                        {{
+                                            planningScale === "day"
+                                                ? "journalière"
+                                                : "hebdomadaire"
+                                        }}
                                     </span>
-                                    <select v-model="planningDateMode" class="rounded-[4px] border-slate-200 bg-slate-50 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-500 focus:ring-blue-500">
-                                        <option value="planned">Dates prévues</option>
-                                        <option value="actual">Dates réelles</option>
+                                    <select
+                                        v-model="planningDateMode"
+                                        class="rounded-[4px] border-slate-200 bg-slate-50 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-500 focus:ring-blue-500"
+                                    >
+                                        <option value="planned">
+                                            Dates prévues
+                                        </option>
+                                        <option value="actual">
+                                            Dates réelles
+                                        </option>
                                     </select>
                                 </div>
                             </div>
-                            <div v-if="planningPeriods.length" class="overflow-x-auto">
+                            <div
+                                v-if="planningPeriods.length"
+                                class="overflow-x-auto"
+                            >
                                 <div :style="planningTimelineStyle">
-                                    <div class="grid border-b border-slate-200 bg-slate-50" :style="planningGridStyle">
-                                        <div class="sticky left-0 z-20 flex items-center border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-700">
+                                    <div
+                                        class="grid border-b border-slate-200 bg-slate-50"
+                                        :style="planningGridStyle"
+                                    >
+                                        <div
+                                            class="sticky left-0 z-20 flex items-center border-r border-slate-200 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-700"
+                                        >
                                             Actions / période
                                         </div>
                                         <div
                                             v-for="period in planningPeriods"
                                             :key="dateKey(period.start)"
                                             class="border-r border-slate-200 py-2 text-center"
-                                            :class="planningPeriodIsToday(period) ? 'bg-blue-100 text-blue-700' : 'text-slate-600'"
+                                            :class="
+                                                planningPeriodIsToday(period)
+                                                    ? 'bg-blue-100 text-blue-700'
+                                                    : 'text-slate-600'
+                                            "
                                         >
-                                            <div class="text-[9px] uppercase">{{ planningPeriodCaption(period) }}</div>
-                                            <div class="whitespace-nowrap text-[11px] font-bold">{{ planningPeriodLabel(period) }}</div>
+                                            <div class="text-[9px] uppercase">
+                                                {{
+                                                    planningPeriodCaption(
+                                                        period,
+                                                    )
+                                                }}
+                                            </div>
+                                            <div
+                                                class="whitespace-nowrap text-[11px] font-bold"
+                                            >
+                                                {{
+                                                    planningPeriodLabel(period)
+                                                }}
+                                            </div>
                                         </div>
                                     </div>
                                     <div
-                                        v-for="(action, index) in selectedWorkspaceProject.actions"
+                                        v-for="(
+                                            action, index
+                                        ) in selectedWorkspaceProject.actions"
                                         :key="action.id"
                                         class="grid min-h-[64px] border-b border-slate-100 last:border-0"
                                         :style="planningGridStyle"
@@ -1709,49 +2203,164 @@ const duplicateProject = (project) => {
                                             type="button"
                                             class="sticky left-0 z-20 border-r border-slate-200 bg-white px-4 py-2 text-left hover:bg-blue-50 disabled:cursor-default"
                                             style="grid-column: 1; grid-row: 1"
-                                            :disabled="!selectedWorkspaceProject.can_manage"
+                                            :disabled="
+                                                !selectedWorkspaceProject.can_manage
+                                            "
                                             :title="action.title"
-                                            @click="openEditActionForm(action, index)"
+                                            @click="
+                                                openEditActionForm(
+                                                    action,
+                                                    index,
+                                                )
+                                            "
                                         >
-                                            <div class="truncate text-xs font-semibold text-slate-800">{{ action.title }}</div>
-                                            <div class="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
-                                                <span>{{ actionStatusLabels[action.status] || '--' }}</span>
-                                                <span class="font-bold text-blue-700">{{ safeProgress(action.progress) }}%</span>
+                                            <div
+                                                class="truncate text-xs font-semibold text-slate-800"
+                                            >
+                                                {{ action.title }}
+                                            </div>
+                                            <div
+                                                class="mt-1 flex items-center gap-2 text-[10px] text-slate-500"
+                                            >
+                                                <span>{{
+                                                    actionStatusLabels[
+                                                        action.status
+                                                    ] || "--"
+                                                }}</span>
+                                                <span
+                                                    class="font-bold text-blue-700"
+                                                    >{{
+                                                        safeProgress(
+                                                            action.progress,
+                                                        )
+                                                    }}%</span
+                                                >
                                             </div>
                                         </button>
                                         <div
-                                            v-for="(period, periodIndex) in planningPeriods"
+                                            v-for="(
+                                                period, periodIndex
+                                            ) in planningPeriods"
                                             :key="dateKey(period.start)"
                                             class="border-r border-slate-100"
-                                            :class="planningPeriodIsToday(period) ? 'bg-blue-50/70' : (planningScale === 'day' && (period.start.getDay() === 0 || period.start.getDay() === 6) ? 'bg-slate-50' : '')"
-                                            :style="{ gridColumn: periodIndex + 2, gridRow: 1 }"
+                                            :class="
+                                                planningPeriodIsToday(period)
+                                                    ? 'bg-blue-50/70'
+                                                    : planningScale === 'day' &&
+                                                        (period.start.getDay() ===
+                                                            0 ||
+                                                            period.start.getDay() ===
+                                                                6)
+                                                      ? 'bg-slate-50'
+                                                      : ''
+                                            "
+                                            :style="{
+                                                gridColumn: periodIndex + 2,
+                                                gridRow: 1,
+                                            }"
                                         />
                                         <div
                                             v-if="actionPlanningSpan(action)"
                                             class="z-10 mx-0.5 my-auto flex h-7 min-w-0 items-center overflow-hidden rounded-[4px] px-2 text-[10px] font-semibold text-white shadow-sm"
-                                            :class="action.status === 'completed' ? 'bg-emerald-500' : action.status === 'on_hold' ? 'bg-amber-500' : action.status === 'cancelled' ? 'bg-rose-500' : action.status === 'in_progress' ? 'bg-blue-600' : 'bg-slate-500'"
-                                            :style="{ gridColumn: actionPlanningSpan(action).gridColumn, gridRow: 1 }"
+                                            :class="
+                                                action.status === 'completed'
+                                                    ? 'bg-emerald-500'
+                                                    : action.status ===
+                                                        'on_hold'
+                                                      ? 'bg-amber-500'
+                                                      : action.status ===
+                                                          'cancelled'
+                                                        ? 'bg-rose-500'
+                                                        : action.status ===
+                                                            'in_progress'
+                                                          ? 'bg-blue-600'
+                                                          : 'bg-slate-500'
+                                            "
+                                            :style="{
+                                                gridColumn:
+                                                    actionPlanningSpan(action)
+                                                        .gridColumn,
+                                                gridRow: 1,
+                                            }"
                                             :title="`${action.title} · ${actionPlanningSpan(action).label}`"
                                         >
-                                            <span class="truncate">{{ actionPlanningSpan(action).label }}</span>
+                                            <span class="truncate">{{
+                                                actionPlanningSpan(action).label
+                                            }}</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                             <div v-else class="px-6 py-12 text-center">
-                                <CalendarDays class="mx-auto h-8 w-8 text-slate-300" />
-                                <p class="mt-3 text-sm font-semibold text-slate-700">Aucune date {{ planningDateMode === 'planned' ? 'prévue' : 'réelle' }} renseignée</p>
-                                <p class="mt-1 text-xs text-slate-500">Ajoutez les dates aux actions pour générer automatiquement le planning.</p>
+                                <CalendarDays
+                                    class="mx-auto h-8 w-8 text-slate-300"
+                                />
+                                <p
+                                    class="mt-3 text-sm font-semibold text-slate-700"
+                                >
+                                    Aucune date
+                                    {{
+                                        planningDateMode === "planned"
+                                            ? "prévue"
+                                            : "réelle"
+                                    }}
+                                    renseignée
+                                </p>
+                                <p class="mt-1 text-xs text-slate-500">
+                                    Ajoutez les dates aux actions pour générer
+                                    automatiquement le planning.
+                                </p>
                             </div>
-                            <div class="flex flex-wrap items-center gap-4 border-t border-slate-200 px-4 py-3 text-[11px] text-slate-600">
-                                <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-slate-500"></span>Non débutée</span>
-                                <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-blue-600"></span>En cours</span>
-                                <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500"></span>Terminée</span>
-                                <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-500"></span>En attente</span>
-                                <span><span class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-rose-500"></span>Annulée</span>
+                            <div
+                                class="flex flex-wrap items-center gap-4 border-t border-slate-200 px-4 py-3 text-[11px] text-slate-600"
+                            >
+                                <span
+                                    ><span
+                                        class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-slate-500"
+                                    ></span
+                                    >Non débutée</span
+                                >
+                                <span
+                                    ><span
+                                        class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-blue-600"
+                                    ></span
+                                    >En cours</span
+                                >
+                                <span
+                                    ><span
+                                        class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-emerald-500"
+                                    ></span
+                                    >Terminée</span
+                                >
+                                <span
+                                    ><span
+                                        class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-amber-500"
+                                    ></span
+                                    >En attente</span
+                                >
+                                <span
+                                    ><span
+                                        class="mr-1 inline-block h-2.5 w-2.5 rounded-sm bg-rose-500"
+                                    ></span
+                                    >Annulée</span
+                                >
                             </div>
-                            <p v-if="planningActionCount < workspaceActionCount" class="border-t border-slate-100 bg-amber-50 px-4 py-2 text-xs text-amber-700">
-                                {{ workspaceActionCount - planningActionCount }} action(s) sans dates {{ planningDateMode === 'planned' ? 'prévues' : 'réelles' }}. Ajoutez leurs dates pour les positionner sur le planning.
+                            <p
+                                v-if="
+                                    planningActionCount < workspaceActionCount
+                                "
+                                class="border-t border-slate-100 bg-amber-50 px-4 py-2 text-xs text-amber-700"
+                            >
+                                {{
+                                    workspaceActionCount - planningActionCount
+                                }}
+                                action(s) sans dates
+                                {{
+                                    planningDateMode === "planned"
+                                        ? "prévues"
+                                        : "réelles"
+                                }}. Ajoutez leurs dates pour les positionner sur
+                                le planning.
                             </p>
                         </div>
                         <div
@@ -1827,27 +2436,59 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <select
-                                                    v-if="isInlineActionEditing(action, 'status')"
-                                                    v-model="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'status',
+                                                        )
+                                                    "
+                                                    v-model="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     class="w-32 rounded-[4px] border-blue-400 py-1 text-xs focus:border-blue-500 focus:ring-blue-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 >
-                                                    <option v-for="status in actionStatuses" :key="status" :value="status">
-                                                        {{ actionStatusLabels[status] }}
+                                                    <option
+                                                        v-for="status in actionStatuses"
+                                                        :key="status"
+                                                        :value="status"
+                                                    >
+                                                        {{
+                                                            actionStatusLabels[
+                                                                status
+                                                            ]
+                                                        }}
                                                     </option>
                                                 </select>
                                                 <span
                                                     v-else
                                                     class="inline-flex rounded-[3px] px-2 py-1 font-semibold ring-1 ring-inset"
                                                     :class="[
-                                                        actionStatusClasses[action.status],
-                                                        selectedWorkspaceProject.can_manage ? 'cursor-pointer hover:ring-2 hover:ring-blue-400' : '',
+                                                        actionStatusClasses[
+                                                            action.status
+                                                        ],
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer hover:ring-2 hover:ring-blue-400'
+                                                            : '',
                                                     ]"
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'status')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'status',
+                                                        )
+                                                    "
                                                     >{{
                                                         actionStatusLabels[
                                                             action.status
@@ -1857,21 +2498,45 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <input
-                                                    v-if="isInlineActionEditing(action, 'start_date')"
-                                                    v-model="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'start_date',
+                                                        )
+                                                    "
+                                                    v-model="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     type="date"
                                                     class="w-32 rounded-[4px] border-sky-400 py-1 text-xs focus:border-sky-500 focus:ring-sky-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 />
                                                 <span
                                                     v-else
                                                     class="inline-block rounded-[3px] border border-sky-200 bg-sky-50 px-2 py-1 font-semibold text-sky-800"
-                                                    :class="selectedWorkspaceProject.can_manage ? 'cursor-pointer hover:ring-2 hover:ring-sky-300' : ''"
+                                                    :class="
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer hover:ring-2 hover:ring-sky-300'
+                                                            : ''
+                                                    "
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'start_date')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'start_date',
+                                                        )
+                                                    "
                                                     >{{
                                                         formatDate(
                                                             action.start_date,
@@ -1881,21 +2546,45 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <input
-                                                    v-if="isInlineActionEditing(action, 'due_date')"
-                                                    v-model="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'due_date',
+                                                        )
+                                                    "
+                                                    v-model="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     type="date"
                                                     class="w-32 rounded-[4px] border-amber-400 py-1 text-xs focus:border-amber-500 focus:ring-amber-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 />
                                                 <span
                                                     v-else
                                                     class="inline-block rounded-[3px] border border-amber-200 bg-amber-50 px-2 py-1 font-semibold text-amber-800"
-                                                    :class="selectedWorkspaceProject.can_manage ? 'cursor-pointer hover:ring-2 hover:ring-amber-300' : ''"
+                                                    :class="
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer hover:ring-2 hover:ring-amber-300'
+                                                            : ''
+                                                    "
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'due_date')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'due_date',
+                                                        )
+                                                    "
                                                     >{{
                                                         formatDate(
                                                             action.due_date,
@@ -1905,21 +2594,45 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <input
-                                                    v-if="isInlineActionEditing(action, 'actual_start_date')"
-                                                    v-model="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'actual_start_date',
+                                                        )
+                                                    "
+                                                    v-model="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     type="date"
                                                     class="w-32 rounded-[4px] border-violet-400 py-1 text-xs focus:border-violet-500 focus:ring-violet-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 />
                                                 <span
                                                     v-else
                                                     class="inline-block rounded-[3px] border border-violet-200 bg-violet-50 px-2 py-1 font-semibold text-violet-800"
-                                                    :class="selectedWorkspaceProject.can_manage ? 'cursor-pointer hover:ring-2 hover:ring-violet-300' : ''"
+                                                    :class="
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer hover:ring-2 hover:ring-violet-300'
+                                                            : ''
+                                                    "
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'actual_start_date')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'actual_start_date',
+                                                        )
+                                                    "
                                                     >{{
                                                         formatDate(
                                                             action.actual_start_date,
@@ -1929,21 +2642,45 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <input
-                                                    v-if="isInlineActionEditing(action, 'actual_end_date')"
-                                                    v-model="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'actual_end_date',
+                                                        )
+                                                    "
+                                                    v-model="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     type="date"
                                                     class="w-32 rounded-[4px] border-emerald-400 py-1 text-xs focus:border-emerald-500 focus:ring-emerald-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 />
                                                 <span
                                                     v-else
                                                     class="inline-block rounded-[3px] border border-emerald-200 bg-emerald-50 px-2 py-1 font-semibold text-emerald-800"
-                                                    :class="selectedWorkspaceProject.can_manage ? 'cursor-pointer hover:ring-2 hover:ring-emerald-300' : ''"
+                                                    :class="
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer hover:ring-2 hover:ring-emerald-300'
+                                                            : ''
+                                                    "
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'actual_end_date')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'actual_end_date',
+                                                        )
+                                                    "
                                                     >{{
                                                         formatDate(
                                                             action.actual_end_date,
@@ -1953,23 +2690,47 @@ const duplicateProject = (project) => {
                                             </td>
                                             <td class="px-3 py-3">
                                                 <input
-                                                    v-if="isInlineActionEditing(action, 'progress')"
-                                                    v-model.number="inlineActionEdit.value"
+                                                    v-if="
+                                                        isInlineActionEditing(
+                                                            action,
+                                                            'progress',
+                                                        )
+                                                    "
+                                                    v-model.number="
+                                                        inlineActionEdit.value
+                                                    "
                                                     autofocus
                                                     type="number"
                                                     min="0"
                                                     max="100"
                                                     class="w-20 rounded-[4px] border-blue-400 py-1 text-xs font-bold focus:border-blue-500 focus:ring-blue-500"
-                                                    :disabled="isSavingInlineAction"
-                                                    @keydown.enter.prevent="saveInlineActionEdit(action)"
-                                                    @keydown.escape.stop.prevent="cancelInlineActionEdit"
+                                                    :disabled="
+                                                        isSavingInlineAction
+                                                    "
+                                                    @keydown.enter.prevent="
+                                                        saveInlineActionEdit(
+                                                            action,
+                                                        )
+                                                    "
+                                                    @keydown.escape.stop.prevent="
+                                                        cancelInlineActionEdit
+                                                    "
                                                 />
                                                 <div
                                                     v-else
                                                     class="flex items-center gap-2"
-                                                    :class="selectedWorkspaceProject.can_manage ? 'cursor-pointer rounded-[4px] p-1 hover:bg-blue-50' : ''"
+                                                    :class="
+                                                        selectedWorkspaceProject.can_manage
+                                                            ? 'cursor-pointer rounded-[4px] p-1 hover:bg-blue-50'
+                                                            : ''
+                                                    "
                                                     title="Double-cliquez pour modifier"
-                                                    @dblclick="startInlineActionEdit(action, 'progress')"
+                                                    @dblclick="
+                                                        startInlineActionEdit(
+                                                            action,
+                                                            'progress',
+                                                        )
+                                                    "
                                                 >
                                                     <div
                                                         class="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200"
@@ -2010,10 +2771,28 @@ const duplicateProject = (project) => {
                                                                 : action.id
                                                     "
                                                 >
-                                                    <span class="inline-flex items-center gap-1.5">
-                                                        <EyeOff v-if="expandedActionId === action.id" class="h-3.5 w-3.5" aria-hidden="true" />
-                                                        <Eye v-else class="h-3.5 w-3.5" aria-hidden="true" />
-                                                        {{ expandedActionId === action.id ? "Masquer" : "Détails" }}
+                                                    <span
+                                                        class="inline-flex items-center gap-1.5"
+                                                    >
+                                                        <EyeOff
+                                                            v-if="
+                                                                expandedActionId ===
+                                                                action.id
+                                                            "
+                                                            class="h-3.5 w-3.5"
+                                                            aria-hidden="true"
+                                                        />
+                                                        <Eye
+                                                            v-else
+                                                            class="h-3.5 w-3.5"
+                                                            aria-hidden="true"
+                                                        />
+                                                        {{
+                                                            expandedActionId ===
+                                                            action.id
+                                                                ? "Masquer"
+                                                                : "Détails"
+                                                        }}
                                                     </span>
                                                 </button>
                                             </td>
@@ -2167,7 +2946,9 @@ const duplicateProject = (project) => {
                 class="flex h-[min(90dvh,760px)] max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden bg-white"
                 @submit.prevent="submitAction"
             >
-                <div class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6">
+                <div
+                    class="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-5 py-4 sm:px-6"
+                >
                     <div>
                         <p
                             class="text-[10px] font-black uppercase tracking-[0.18em] text-blue-600"
@@ -2191,7 +2972,9 @@ const duplicateProject = (project) => {
                     </button>
                 </div>
 
-                <div class="grid min-h-0 flex-1 gap-3 overflow-y-auto px-5 py-4 sm:grid-cols-2 sm:px-6">
+                <div
+                    class="grid min-h-0 flex-1 gap-3 overflow-y-auto px-5 py-4 sm:grid-cols-2 sm:px-6"
+                >
                     <div
                         class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-[4px] border border-blue-100 bg-blue-50/70 px-4 py-2.5 sm:col-span-2"
                     >
@@ -2331,8 +3114,13 @@ const duplicateProject = (project) => {
         </Modal>
 
         <Modal :show="isFormOpen" max-width="6xl" @close="closeForm">
-            <form class="flex h-[min(90dvh,850px)] max-h-[calc(100dvh-1rem)] min-w-0 flex-col overflow-hidden bg-white" @submit.prevent="submitProject">
-                <div class="z-10 flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-7">
+            <form
+                class="flex h-[min(90dvh,850px)] max-h-[calc(100dvh-1rem)] min-w-0 flex-col overflow-hidden bg-white"
+                @submit.prevent="submitProject"
+            >
+                <div
+                    class="z-10 flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 bg-slate-50 px-4 py-4 sm:px-7"
+                >
                     <div>
                         <h2 class="text-xl font-bold text-slate-900">
                             {{
@@ -2354,278 +3142,451 @@ const duplicateProject = (project) => {
                     </button>
                 </div>
 
-                <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7">
-                <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
-                    >
-                        Nom du projet
-                        <input
-                            v-model="projectForm.name"
-                            required
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <InputError :message="projectForm.errors.name" />
-                    </label>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Code
-                        <input
-                            v-model="projectForm.code"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <InputError :message="projectForm.errors.code" />
-                    </label>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Responsable
-                        <select
-                            v-model="projectForm.manager_id"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                <div
+                    class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7"
+                >
+                    <div class="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
                         >
-                            <option value="">Non assigné</option>
-                            <option
-                                v-for="manager in managers"
-                                :key="manager.id"
-                                :value="manager.id"
+                            Nom du projet
+                            <input
+                                v-model="projectForm.name"
+                                required
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <InputError :message="projectForm.errors.name" />
+                        </label>
+                        <fieldset
+                            class="grid gap-2 rounded-[4px] border border-cyan-200 bg-cyan-50/40 p-4 md:col-span-2"
+                        >
+                            <legend
+                                class="px-1 text-sm font-bold text-slate-700"
                             >
-                                {{ manager.name }}
-                            </option>
-                        </select>
-                        <InputError :message="projectForm.errors.manager_id" />
-                    </label>
-                    <fieldset class="grid gap-2 rounded-[4px] border border-cyan-200 bg-cyan-50/40 p-4 md:col-span-2">
-                        <legend class="px-1 text-sm font-bold text-slate-700">
-                            Départements participants (2 minimum)
-                        </legend>
-                        <p class="text-xs text-slate-500">
-                            Un projet peut réunir plusieurs départements de {{ organization.name }}.
-                        </p>
-                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                            <label
-                                v-for="projectDepartment in departments"
-                                :key="projectDepartment.id"
-                                class="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                                Départements participants
+                            </legend>
+                            <p class="text-xs text-slate-500">
+                                Un projet peut réunir plusieurs départements de
+                                {{ organization.name }}.
+                            </p>
+                            <div
+                                class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3"
                             >
-                                <input
-                                    v-model="projectForm.department_ids"
-                                    type="checkbox"
-                                    :value="projectDepartment.id"
-                                    class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                {{ projectDepartment.name }}
-                            </label>
+                                <label
+                                    v-for="projectDepartment in departments"
+                                    :key="projectDepartment.id"
+                                    class="flex items-center gap-2 rounded border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                                >
+                                    <input
+                                        v-model="projectForm.department_ids"
+                                        type="checkbox"
+                                        :value="projectDepartment.id"
+                                        class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                    />
+                                    {{ projectDepartment.name }}
+                                </label>
+                            </div>
+                            <InputError
+                                :message="projectForm.errors.department_ids"
+                            />
+                        </fieldset>
+                        <section
+                            class="space-y-3 border border-blue-200 bg-blue-50/30 p-4 md:col-span-2"
+                        >
+                            <div
+                                class="flex flex-wrap items-center justify-between gap-3"
+                            >
+                                <div>
+                                    <h3
+                                        class="text-sm font-bold text-slate-900"
+                                    >
+                                        Membres et responsables par département
+                                    </h3>
+                                    <p class="mt-1 text-xs text-slate-500">
+                                        Cochez les participants et cliquez sur
+                                        l’étoile pour désigner un responsable
+                                        par département.
+                                    </p>
+                                </div>
+                                <span
+                                    class="bg-white px-3 py-1 text-xs font-bold text-blue-700"
+                                    >{{
+                                        projectForm.project_members.length
+                                    }}
+                                    membre(s)</span
+                                >
+                            </div>
+                            <input
+                                v-model="memberSearch"
+                                type="search"
+                                placeholder="Rechercher un collaborateur..."
+                                class="w-full border-slate-200 bg-white text-sm focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <div
+                                v-if="!selectedDepartments.length"
+                                class="border border-dashed border-slate-300 bg-white px-4 py-6 text-center text-sm text-slate-500"
+                            >
+                                Sélectionnez au moins un département pour
+                                afficher ses collaborateurs.
+                            </div>
+                            <div class="grid gap-3 lg:grid-cols-2">
+                                <div
+                                    v-for="selectedDepartment in selectedDepartments"
+                                    :key="selectedDepartment.id"
+                                    class="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+                                >
+                                <div
+                                    class="flex items-center justify-between border-b border-slate-200 bg-slate-50 px-3 py-2"
+                                >
+                                    <h4
+                                        class="text-sm font-bold text-slate-800"
+                                    >
+                                        {{ selectedDepartment.name }}
+                                    </h4>
+                                    <span class="text-xs text-slate-500"
+                                        >{{
+                                            departmentUsers(
+                                                selectedDepartment,
+                                            ).filter((user) =>
+                                                isProjectMember(user.id),
+                                            ).length
+                                        }}
+                                        sélectionné(s)</span
+                                    >
+                                </div>
+                                <div
+                                    v-if="
+                                        !departmentUsers(selectedDepartment)
+                                            .length
+                                    "
+                                    class="px-3 py-3 text-xs text-amber-700"
+                                >
+                                    Aucun utilisateur transmis pour ce
+                                    département. Vérifiez les données envoyées
+                                    par le contrôleur.
+                                </div>
+                                <div
+                                    v-else-if="
+                                        !filteredDepartmentUsers(
+                                            selectedDepartment,
+                                        ).length
+                                    "
+                                    class="px-3 py-3 text-xs text-slate-500"
+                                >
+                                    Aucun utilisateur correspondant à la
+                                    recherche.
+                                </div>
+                                    <div
+                                        v-for="user in filteredDepartmentUsers(
+                                            selectedDepartment,
+                                        )"
+                                        :key="user.id"
+                                        class="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-0"
+                                    >
+                                    <label
+                                        class="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-sm text-slate-700"
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            :checked="isProjectMember(user.id)"
+                                            class="rounded border-slate-300 text-blue-600"
+                                            @change="
+                                                toggleProjectMember(user.id)
+                                            "
+                                        />
+                                        <span class="truncate">{{
+                                            user.name
+                                        }}</span>
+                                    </label>
+                                    <button
+                                        type="button"
+                                        class="flex shrink-0 items-center gap-1.5 px-2 py-1 text-xs font-semibold"
+                                        :class="
+                                            String(
+                                                projectForm
+                                                    .department_responsibles[
+                                                    String(
+                                                        selectedDepartment.id,
+                                                    )
+                                                ],
+                                            ) === String(user.id)
+                                                ? 'text-amber-600'
+                                                : 'text-slate-400 hover:text-amber-600'
+                                        "
+                                        :title="
+                                            'Définir comme responsable de ' +
+                                            selectedDepartment.name
+                                        "
+                                        :aria-label="
+                                            'Responsable de ' +
+                                            selectedDepartment.name
+                                        "
+                                        @click="
+                                            toggleDepartmentResponsible(
+                                                selectedDepartment.id,
+                                                user.id,
+                                            )
+                                        "
+                                    >
+                                        <span class="text-xl leading-none">{{
+                                            String(
+                                                projectForm
+                                                    .department_responsibles[
+                                                    String(
+                                                        selectedDepartment.id,
+                                                    )
+                                                ],
+                                            ) === String(user.id)
+                                                ? "★"
+                                                : "☆"
+                                        }}</span>
+                                        <span class="hidden sm:inline"
+                                            >Responsable</span
+                                        >
+                                    </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <InputError
+                                :message="projectForm.errors.project_members"
+                            />
+                            <InputError
+                                :message="
+                                    projectForm.errors.department_responsibles
+                                "
+                            />
+                        </section>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
+                        >
+                            Catégorie du projet
+                            <select
+                                v-model="projectForm.project_category_id"
+                                required
+                                class="rounded-[4px] border-cyan-200 bg-cyan-50/40 focus:border-cyan-500 focus:ring-cyan-500"
+                            >
+                                <option value="" disabled>
+                                    Choisir une catégorie
+                                </option>
+                                <option
+                                    v-for="category in projectCategories"
+                                    :key="category.id"
+                                    :value="category.id"
+                                >
+                                    {{ category.name }} · Chef :
+                                    {{
+                                        category.manager?.name || "Non assigné"
+                                    }}
+                                </option>
+                            </select>
+                            <InputError
+                                :message="
+                                    projectForm.errors.project_category_id
+                                "
+                            />
+                        </label>
+                        <label
+                            class="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
+                        >
+                            Plan d’action
+                            <select
+                                v-model="projectForm.action_plan_id"
+                                class="block w-full min-w-0 max-w-full rounded-[4px] border-blue-200 bg-blue-50/40 text-sm focus:border-blue-500 focus:ring-blue-500"
+                                @change="handleActionPlanChange"
+                            >
+                                <option value="">Sans plan</option>
+                                <option
+                                    v-for="plan in actionPlans"
+                                    :key="plan.id"
+                                    :value="plan.id"
+                                >
+                                    {{ plan.code ? `${plan.code} · ` : ""
+                                    }}{{ plan.name }}
+                                </option>
+                            </select>
+                            <InputError
+                                :message="projectForm.errors.action_plan_id"
+                            />
+                        </label>
+                        <label
+                            class="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
+                        >
+                            Axe
+                            <select
+                                v-model="projectForm.axis_id"
+                                class="block w-full min-w-0 max-w-full rounded-[4px] border-violet-200 bg-violet-50/40 text-sm focus:border-violet-500 focus:ring-violet-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                                :disabled="
+                                    !projectForm.action_plan_id ||
+                                    !availableAxes.length
+                                "
+                            >
+                                <option value="">
+                                    {{
+                                        availableAxes.length
+                                            ? "Sans axe"
+                                            : "Aucun axe disponible"
+                                    }}
+                                </option>
+                                <option
+                                    v-for="axis in availableAxes"
+                                    :key="axis.id"
+                                    :value="axis.id"
+                                >
+                                    {{ axis.code ? `${axis.code} · ` : ""
+                                    }}{{ axis.name }}
+                                </option>
+                            </select>
+                            <InputError :message="projectForm.errors.axis_id" />
+                        </label>
+                        <div
+                            class="flex flex-wrap items-center gap-2 rounded-[4px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600 md:col-span-2"
+                        >
+                            <span
+                                class="rounded-full bg-blue-600 px-2.5 py-1 text-white"
+                                >Plan</span
+                            >
+                            <span>{{
+                                selectedActionPlan?.name ?? "Non rattaché"
+                            }}</span>
+                            <span class="text-slate-300">→</span>
+                            <span
+                                class="rounded-full bg-violet-600 px-2.5 py-1 text-white"
+                                >Axe</span
+                            >
+                            <span>{{
+                                selectedAxis?.name ?? "Non rattaché"
+                            }}</span>
+                            <span class="text-slate-300">→</span>
+                            <span
+                                class="rounded-full bg-slate-800 px-2.5 py-1 text-white"
+                                >Projet</span
+                            >
+                            <span>{{ projectForm.name || "À nommer" }}</span>
                         </div>
-                        <InputError :message="projectForm.errors.department_ids" />
-                    </fieldset>
-                    <label class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2">
-                        Catégorie du projet
-                        <select
-                            v-model="projectForm.project_category_id"
-                            required
-                            class="rounded-[4px] border-cyan-200 bg-cyan-50/40 focus:border-cyan-500 focus:ring-cyan-500"
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700"
                         >
-                            <option value="" disabled>Choisir une catégorie</option>
-                            <option
-                                v-for="category in projectCategories"
-                                :key="category.id"
-                                :value="category.id"
+                            Statut
+                            <select
+                                v-model="projectForm.status"
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
                             >
-                                {{ category.name }} · Chef : {{ category.manager?.name || "Non assigné" }}
-                            </option>
-                        </select>
-                        <InputError :message="projectForm.errors.project_category_id" />
-                    </label>
-                    <label
-                        class="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
-                    >
-                        Plan d’action
-                        <select
-                            v-model="projectForm.action_plan_id"
-                            class="block w-full min-w-0 max-w-full rounded-[4px] border-blue-200 bg-blue-50/40 text-sm focus:border-blue-500 focus:ring-blue-500"
-                            @change="handleActionPlanChange"
+                                <option
+                                    v-for="status in statuses"
+                                    :key="status"
+                                    :value="status"
+                                >
+                                    {{ statusLabels[status] }}
+                                </option>
+                            </select>
+                            <InputError :message="projectForm.errors.status" />
+                        </label>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700"
                         >
-                            <option value="">Sans plan</option>
-                            <option
-                                v-for="plan in actionPlans"
-                                :key="plan.id"
-                                :value="plan.id"
+                            Priorité
+                            <select
+                                v-model="projectForm.priority"
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
                             >
-                                {{ plan.code ? `${plan.code} · ` : ""
-                                }}{{ plan.name }}
-                            </option>
-                        </select>
-                        <InputError
-                            :message="projectForm.errors.action_plan_id"
-                        />
-                    </label>
-                    <label
-                        class="grid min-w-0 gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
-                    >
-                        Axe
-                        <select
-                            v-model="projectForm.axis_id"
-                            class="block w-full min-w-0 max-w-full rounded-[4px] border-violet-200 bg-violet-50/40 text-sm focus:border-violet-500 focus:ring-violet-500 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                            :disabled="
-                                !projectForm.action_plan_id ||
-                                !availableAxes.length
-                            "
+                                <option
+                                    v-for="priority in priorities"
+                                    :key="priority"
+                                    :value="priority"
+                                >
+                                    {{ priorityLabels[priority] }}
+                                </option>
+                            </select>
+                            <InputError
+                                :message="projectForm.errors.priority"
+                            />
+                        </label>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700"
                         >
-                            <option value="">
-                                {{
-                                    availableAxes.length
-                                        ? "Sans axe"
-                                        : "Aucun axe disponible"
-                                }}
-                            </option>
-                            <option
-                                v-for="axis in availableAxes"
-                                :key="axis.id"
-                                :value="axis.id"
-                            >
-                                {{ axis.code ? `${axis.code} · ` : ""
-                                }}{{ axis.name }}
-                            </option>
-                        </select>
-                        <InputError :message="projectForm.errors.axis_id" />
-                    </label>
-                    <div
-                        class="flex flex-wrap items-center gap-2 rounded-[4px] border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600 md:col-span-2"
-                    >
-                        <span
-                            class="rounded-full bg-blue-600 px-2.5 py-1 text-white"
-                            >Plan</span
+                            Ordre de priorité
+                            <input
+                                v-model.number="projectForm.position"
+                                type="number"
+                                min="1"
+                                required
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <InputError
+                                :message="projectForm.errors.position"
+                            />
+                        </label>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700"
                         >
-                        <span>{{
-                            selectedActionPlan?.name ?? "Non rattaché"
-                        }}</span>
-                        <span class="text-slate-300">→</span>
-                        <span
-                            class="rounded-full bg-violet-600 px-2.5 py-1 text-white"
-                            >Axe</span
+                            Date de début
+                            <input
+                                v-model="projectForm.start_date"
+                                type="date"
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <InputError
+                                :message="projectForm.errors.start_date"
+                            />
+                        </label>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700"
                         >
-                        <span>{{ selectedAxis?.name ?? "Non rattaché" }}</span>
-                        <span class="text-slate-300">→</span>
-                        <span
-                            class="rounded-full bg-slate-800 px-2.5 py-1 text-white"
-                            >Projet</span
+                            Échéance
+                            <input
+                                v-model="projectForm.due_date"
+                                type="date"
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                            />
+                            <InputError
+                                :message="projectForm.errors.due_date"
+                            />
+                        </label>
+                        <div
+                            class="rounded-[4px] border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 md:col-span-2"
                         >
-                        <span>{{ projectForm.name || "À nommer" }}</span>
+                            <strong>Progression automatique</strong>
+                            <p class="mt-1 text-xs leading-5 text-blue-600">
+                                Calculée à partir de la moyenne des actions du
+                                projet.
+                            </p>
+                        </div>
+                        <label
+                            class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
+                        >
+                            Description
+                            <textarea
+                                v-model="projectForm.description"
+                                rows="4"
+                                class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
+                            ></textarea>
+                            <InputError
+                                :message="projectForm.errors.description"
+                            />
+                        </label>
+                        <label
+                            class="flex items-center gap-3 text-sm font-medium text-slate-700"
+                        >
+                            <input
+                                v-model="projectForm.is_active"
+                                type="checkbox"
+                                class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            Projet actif
+                        </label>
+                        <label
+                            class="flex items-center gap-3 text-sm font-medium text-slate-700"
+                        >
+                            <input
+                                v-model="projectForm.is_private"
+                                type="checkbox"
+                                class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            Projet privé
+                        </label>
                     </div>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Statut
-                        <select
-                            v-model="projectForm.status"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        >
-                            <option
-                                v-for="status in statuses"
-                                :key="status"
-                                :value="status"
-                            >
-                                {{ statusLabels[status] }}
-                            </option>
-                        </select>
-                        <InputError :message="projectForm.errors.status" />
-                    </label>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Priorité
-                        <select
-                            v-model="projectForm.priority"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        >
-                            <option
-                                v-for="priority in priorities"
-                                :key="priority"
-                                :value="priority"
-                            >
-                                {{ priorityLabels[priority] }}
-                            </option>
-                        </select>
-                        <InputError :message="projectForm.errors.priority" />
-                    </label>
-                    <label class="grid gap-1.5 text-sm font-medium text-slate-700">
-                        Ordre de priorité
-                        <input
-                            v-model.number="projectForm.position"
-                            type="number"
-                            min="1"
-                            required
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <InputError :message="projectForm.errors.position" />
-                    </label>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Date de début
-                        <input
-                            v-model="projectForm.start_date"
-                            type="date"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <InputError :message="projectForm.errors.start_date" />
-                    </label>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700"
-                    >
-                        Échéance
-                        <input
-                            v-model="projectForm.due_date"
-                            type="date"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        />
-                        <InputError :message="projectForm.errors.due_date" />
-                    </label>
-                    <div
-                        class="rounded-[4px] border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700 md:col-span-2"
-                    >
-                        <strong>Progression automatique</strong>
-                        <p class="mt-1 text-xs leading-5 text-blue-600">
-                            Calculée à partir de la moyenne des actions du
-                            projet.
-                        </p>
-                    </div>
-                    <label
-                        class="grid gap-1.5 text-sm font-medium text-slate-700 md:col-span-2"
-                    >
-                        Description
-                        <textarea
-                            v-model="projectForm.description"
-                            rows="4"
-                            class="rounded-[4px] border-slate-200 focus:border-blue-500 focus:ring-blue-500"
-                        ></textarea>
-                        <InputError :message="projectForm.errors.description" />
-                    </label>
-                    <label
-                        class="flex items-center gap-3 text-sm font-medium text-slate-700"
-                    >
-                        <input
-                            v-model="projectForm.is_active"
-                            type="checkbox"
-                            class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        Projet actif
-                    </label>
-                    <label
-                        class="flex items-center gap-3 text-sm font-medium text-slate-700"
-                    >
-                        <input
-                            v-model="projectForm.is_private"
-                            type="checkbox"
-                            class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        Projet privé
-                    </label>
-                </div>
 
-                <InputError :message="projectForm.errors.project" />
+                    <InputError :message="projectForm.errors.project" />
                 </div>
 
                 <div
@@ -2766,20 +3727,33 @@ const duplicateProject = (project) => {
     white-space: nowrap;
 }
 .wp-icon-btn {
-    border: 1px solid #cbd5e1;
-    background: #fff;
-    border-radius: 4px;
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.06);
     font-size: 16px;
     font-weight: 700;
+    transition:
+        transform 150ms ease,
+        border-color 150ms ease,
+        background-color 150ms ease,
+        box-shadow 150ms ease;
 }
 .wp-icon-btn:hover {
-    background: #eff6ff;
     border-color: #93c5fd;
+    background: #eff6ff;
+    box-shadow: 0 4px 10px rgb(37 99 235 / 0.12);
+    transform: translateY(-1px);
+}
+.wp-icon-btn:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
 }
 .wp-table-scroll {
     scrollbar-width: thin;

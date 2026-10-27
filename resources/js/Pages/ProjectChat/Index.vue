@@ -1,8 +1,9 @@
 <script setup>
-import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { Head } from "@inertiajs/vue3";
 import axios from "axios";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout.vue";
+import { useSweetAlert } from "@/Composables/useSweetAlert";
 
 const props = defineProps({
     projects: {
@@ -14,6 +15,7 @@ const props = defineProps({
         required: true,
     },
 });
+const { confirmAction, notify } = useSweetAlert();
 
 const search = ref("");
 const chatProjects = ref([...props.projects]);
@@ -25,6 +27,9 @@ const members = ref([]);
 const reads = ref([]);
 const draft = ref("");
 const files = ref([]);
+const imagePreviews = ref({});
+const failedImagePreviews = ref({});
+const loadingImagePreviews = new Set();
 
 const loading = ref(false);
 const sending = ref(false);
@@ -32,6 +37,8 @@ const error = ref("");
 const showMembers = ref(false);
 const mobileChat = ref(false);
 const detailsId = ref(null);
+const deletingMessageIds = ref([]);
+const photoViewerId = ref(null);
 
 const messagePane = ref(null);
 const filePicker = ref(null);
@@ -74,6 +81,22 @@ const filteredProjects = computed(() => {
         `${p.name} ${p.code || ""}`.toLowerCase().includes(q),
     );
 });
+const galleryImages = computed(() =>
+    messages.value.flatMap((message) =>
+        (message.attachments || [])
+            .filter(
+                (file) =>
+                    isPreviewableImage(file) && imagePreviews.value[file.id],
+            )
+            .map((file) => ({ ...file, sender: message.user?.name || "Utilisateur" })),
+    ),
+);
+const activePhotoIndex = computed(() =>
+    galleryImages.value.findIndex(
+        (file) => Number(file.id) === Number(photoViewerId.value),
+    ),
+);
+const activePhoto = computed(() => galleryImages.value[activePhotoIndex.value] || null);
 
 const endpoint = (id) => `/project-chat/projects/${id}`;
 
@@ -196,6 +219,82 @@ function unseen(message) {
     );
 }
 
+function canDeleteMessage(message) {
+    return isMine(message) && seen(message).length === 0;
+}
+
+function openPhoto(file) {
+    if (!imagePreviews.value[file.id]) return;
+    photoViewerId.value = file.id;
+}
+
+function closePhotoViewer() {
+    photoViewerId.value = null;
+}
+
+function previousPhoto() {
+    if (activePhotoIndex.value > 0) {
+        photoViewerId.value = galleryImages.value[activePhotoIndex.value - 1].id;
+    }
+}
+
+function nextPhoto() {
+    if (activePhotoIndex.value < galleryImages.value.length - 1) {
+        photoViewerId.value = galleryImages.value[activePhotoIndex.value + 1].id;
+    }
+}
+
+function handlePhotoViewerKeydown(event) {
+    if (!photoViewerId.value) return;
+    if (event.key === "Escape") closePhotoViewer();
+    if (event.key === "ArrowLeft") previousPhoto();
+    if (event.key === "ArrowRight") nextPhoto();
+}
+
+async function deleteMessage(message) {
+    if (
+        !selected.value ||
+        !canDeleteMessage(message) ||
+        deletingMessageIds.value.includes(message.id)
+    ) {
+        return;
+    }
+
+    const confirmed = await confirmAction({
+        title: "Supprimer ce message ?",
+        text: "Le message et ses fichiers seront supprimés définitivement.",
+        confirmButtonText: "Oui, supprimer",
+        icon: "warning",
+    });
+
+    if (!confirmed) return;
+
+    deletingMessageIds.value.push(message.id);
+    error.value = "";
+
+    try {
+        await axios.delete(
+            `${endpoint(selected.value.id)}/messages/${message.id}`,
+        );
+        messages.value = messages.value.filter(
+            (item) => Number(item.id) !== Number(message.id),
+        );
+        await refreshGroups();
+        notify("Message supprimé avec succès.");
+    } catch (exception) {
+        error.value =
+            exception.response?.data?.errors?.message?.[0] ||
+            exception.response?.data?.message ||
+            "Impossible de supprimer ce message.";
+        notify(error.value, "error");
+        await load(true);
+    } finally {
+        deletingMessageIds.value = deletingMessageIds.value.filter(
+            (id) => Number(id) !== Number(message.id),
+        );
+    }
+}
+
 function scrollEnd() {
     nextTick(() => {
         if (messagePane.value) {
@@ -266,6 +365,7 @@ async function load(silent = false) {
         messages.value = data.messages || [];
         members.value = data.members || [];
         reads.value = data.reads || [];
+        loadImagePreviews(messages.value);
 
         if (!silent || previousId !== messages.value.at(-1)?.id) {
             scrollEnd();
@@ -306,6 +406,7 @@ function openProject(project) {
     detailsId.value = null;
     showMembers.value = false;
     error.value = "";
+    closePhotoViewer();
 
     window.history.replaceState({}, "", `/project-chat?project=${project.id}`);
 
@@ -422,6 +523,49 @@ function attachmentUrl(file, preview = false) {
     return preview ? `${url}?preview=1` : url;
 }
 
+async function loadImagePreviews(items) {
+    const attachments = items
+        .flatMap((message) => message.attachments || [])
+        .filter(
+            (file) =>
+                isPreviewableImage(file) &&
+                !imagePreviews.value[file.id] &&
+                !failedImagePreviews.value[file.id] &&
+                !loadingImagePreviews.has(file.id),
+        );
+
+    await Promise.all(
+        attachments.map(async (file) => {
+            loadingImagePreviews.add(file.id);
+
+            try {
+                const response = await axios.get(
+                    `${attachmentUrl(file, true)}&data_url=1`,
+                );
+                const dataUrl = response.data?.data_url;
+                if (
+                    typeof dataUrl !== "string" ||
+                    !dataUrl.startsWith("data:image/")
+                ) {
+                    throw new Error("Invalid image preview");
+                }
+
+                imagePreviews.value = {
+                    ...imagePreviews.value,
+                    [file.id]: dataUrl,
+                };
+            } catch {
+                failedImagePreviews.value = {
+                    ...failedImagePreviews.value,
+                    [file.id]: true,
+                };
+            } finally {
+                loadingImagePreviews.delete(file.id);
+            }
+        }),
+    );
+}
+
 onMounted(() => {
     const id = Number(
         new URLSearchParams(window.location.search).get("project"),
@@ -442,6 +586,11 @@ onMounted(() => {
     }, 5000);
 
     document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("keydown", handlePhotoViewerKeydown);
+});
+
+watch(photoViewerId, (id) => {
+    document.body.style.overflow = id ? "hidden" : "";
 });
 
 onUnmounted(() => {
@@ -450,6 +599,8 @@ onUnmounted(() => {
     sequence++;
 
     document.removeEventListener("visibilitychange", handleVisibility);
+    window.removeEventListener("keydown", handlePhotoViewerKeydown);
+    document.body.style.overflow = "";
 });
 </script>
 
@@ -734,18 +885,20 @@ onUnmounted(() => {
                                                         <a
                                                             v-for="file in message.attachments"
                                                             :key="file.id"
-                                                            :href="attachmentUrl(file, isPreviewableImage(file))"
+                                                            :href="imagePreviews[file.id] || attachmentUrl(file, isPreviewableImage(file))"
                                                             :class="isPreviewableImage(file) ? 'wp-image-attachment' : 'wp-attachment'"
                                                             :target="isPreviewableImage(file) ? '_blank' : undefined"
                                                             :download="isPreviewableImage(file) ? undefined : file.original_name"
                                                             rel="noopener"
+                                                            @click="isPreviewableImage(file) ? ($event.preventDefault(), openPhoto(file)) : null"
                                                         >
-                                                            <template v-if="isPreviewableImage(file)">
+                                                            <template v-if="isPreviewableImage(file) && !failedImagePreviews[file.id]">
                                                                 <img
-                                                                    :src="attachmentUrl(file, true)"
+                                                                    v-if="imagePreviews[file.id]"
+                                                                    :src="imagePreviews[file.id]"
                                                                     :alt="file.original_name"
-                                                                    loading="lazy"
                                                                 />
+                                                                <span v-else class="wp-image-loading" aria-label="Chargement de l’image"><span></span></span>
                                                                 <span class="wp-image-caption">
                                                                     <span>{{ file.original_name }}</span>
                                                                     <small>{{ formatSize(file.size) }}</small>
@@ -857,6 +1010,18 @@ onUnmounted(() => {
                                                                         1,
                                                                 )
                                                             }}
+                                                        </button>
+
+                                                        <button
+                                                            v-if="canDeleteMessage(message)"
+                                                            type="button"
+                                                            class="wp-delete-message"
+                                                            :disabled="deletingMessageIds.includes(message.id)"
+                                                            title="Supprimer avant lecture"
+                                                            @click="deleteMessage(message)"
+                                                        >
+                                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18" /><path d="M8 6V4h8v2" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v5M14 11v5" /></svg>
+                                                            {{ deletingMessageIds.includes(message.id) ? "Suppression…" : "Supprimer" }}
                                                         </button>
                                                     </div>
 
@@ -1114,9 +1279,69 @@ onUnmounted(() => {
             </div>
         </div>
     </AuthenticatedLayout>
+
+    <Teleport to="body">
+        <Transition name="wp-photo-viewer">
+            <div v-if="activePhoto" class="wp-photo-viewer" role="dialog" aria-modal="true" :aria-label="`Aperçu de ${activePhoto.original_name}`" @click.self="closePhotoViewer">
+                <header class="wp-photo-viewer-header">
+                    <div class="wp-photo-viewer-title"><strong>{{ activePhoto.original_name }}</strong><span>{{ activePhoto.sender }} · {{ formatSize(activePhoto.size) }} · {{ activePhotoIndex + 1 }}/{{ galleryImages.length }}</span></div>
+                    <a :href="attachmentUrl(activePhoto)" :download="activePhoto.original_name" class="wp-photo-viewer-action" title="Télécharger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 20h14" /></svg></a>
+                    <button type="button" class="wp-photo-viewer-action" title="Fermer" @click="closePhotoViewer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18" /></svg></button>
+                </header>
+                <button type="button" class="wp-photo-nav wp-photo-nav-left" :disabled="activePhotoIndex <= 0" aria-label="Photo précédente" @click="previousPhoto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m15 18-6-6 6-6" /></svg></button>
+                <div class="wp-photo-stage"><img :src="imagePreviews[activePhoto.id]" :alt="activePhoto.original_name" /></div>
+                <button type="button" class="wp-photo-nav wp-photo-nav-right" :disabled="activePhotoIndex >= galleryImages.length - 1" aria-label="Photo suivante" @click="nextPhoto"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 18 6-6-6-6" /></svg></button>
+            </div>
+        </Transition>
+    </Teleport>
 </template>
 
 <style scoped>
+.wp-photo-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: rgba(2, 6, 23, 0.94);
+    backdrop-filter: blur(10px);
+}
+
+.wp-photo-viewer-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 14px 18px;
+    color: white;
+    background: rgba(15, 23, 42, 0.72);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.wp-photo-viewer-title { min-width: 0; flex: 1; }
+.wp-photo-viewer-title strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.wp-photo-viewer-title span { display: block; margin-top: 2px; color: #94a3b8; font-size: 11px; }
+.wp-photo-viewer-action { display: grid; width: 40px; height: 40px; flex-shrink: 0; place-items: center; border: 1px solid rgba(255,255,255,.16); border-radius: 10px; color: white; background: rgba(255,255,255,.08); }
+.wp-photo-viewer-action:hover { background: rgba(255,255,255,.16); }
+.wp-photo-viewer-action svg { width: 19px; height: 19px; }
+.wp-photo-stage { display: grid; min-width: 0; min-height: 0; place-items: center; padding: 24px 88px; overflow: auto; }
+.wp-photo-stage img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 24px 80px rgba(0,0,0,.4); }
+.wp-photo-nav { position: absolute; top: 50%; z-index: 2; display: grid; width: 52px; height: 52px; place-items: center; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: white; background: rgba(15,23,42,.72); transform: translateY(-50%); }
+.wp-photo-nav:hover:not(:disabled) { background: #2563eb; }
+.wp-photo-nav:disabled { cursor: not-allowed; opacity: .22; }
+.wp-photo-nav svg { width: 25px; height: 25px; }
+.wp-photo-nav-left { left: 20px; }
+.wp-photo-nav-right { right: 20px; }
+.wp-photo-viewer-enter-active, .wp-photo-viewer-leave-active { transition: opacity .18s ease; }
+.wp-photo-viewer-enter-from, .wp-photo-viewer-leave-to { opacity: 0; }
+
+@media (max-width: 640px) {
+    .wp-photo-stage { padding: 18px 52px; }
+    .wp-photo-nav { width: 40px; height: 40px; }
+    .wp-photo-nav-left { left: 7px; }
+    .wp-photo-nav-right { right: 7px; }
+}
+
 /* =========================================
    PAGE
 ========================================= */
@@ -1627,6 +1852,29 @@ onUnmounted(() => {
     margin-right: 3px;
 }
 
+.wp-delete-message {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: #e11d48;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.wp-delete-message:hover {
+    color: #be123c;
+}
+
+.wp-delete-message:disabled {
+    cursor: wait;
+    opacity: 0.55;
+}
+
+.wp-delete-message svg {
+    width: 12px;
+    height: 12px;
+}
+
 .wp-read-details {
     border-top: 1px solid #d6e3f5;
     margin-top: 10px;
@@ -1665,14 +1913,44 @@ onUnmounted(() => {
     border-radius: 11px;
     background: #e2e8f0;
     text-decoration: none;
+    border: 1px solid rgba(148, 163, 184, 0.35);
 }
 
 .wp-image-attachment img {
     display: block;
     width: 100%;
     max-height: 360px;
-    object-fit: cover;
+    min-height: 180px;
+    object-fit: contain;
+    background: #f8fafc;
     transition: transform 220ms ease;
+}
+
+.wp-image-loading {
+    display: grid;
+    width: min(420px, 70vw);
+    height: 220px;
+    place-items: center;
+    background: linear-gradient(110deg, #e8eef6 8%, #f8fafc 22%, #e8eef6 36%);
+    background-size: 200% 100%;
+    animation: wp-image-loading 1.3s linear infinite;
+}
+
+.wp-image-loading span {
+    width: 32px;
+    height: 32px;
+    border: 3px solid #bfdbfe;
+    border-top-color: #2563eb;
+    border-radius: 999px;
+    animation: wp-image-spin 0.8s linear infinite;
+}
+
+@keyframes wp-image-loading {
+    to { background-position-x: -200%; }
+}
+
+@keyframes wp-image-spin {
+    to { transform: rotate(360deg); }
 }
 
 .wp-image-attachment:hover img {

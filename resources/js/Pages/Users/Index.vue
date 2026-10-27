@@ -29,7 +29,7 @@ const userForm = useForm({
     email: "",
     password: "",
     password_confirmation: "",
-    department_id: props.department?.id ?? "",
+    department_ids: props.department?.id ? [props.department.id] : [],
     role_id: "",
     job_title: "",
 });
@@ -45,7 +45,7 @@ const initials = (name) =>
 const openCreate = () => {
     editingUser.value = null;
     userForm.reset();
-    userForm.department_id = props.department?.id ?? "";
+    userForm.department_ids = props.department?.id ? [props.department.id] : [];
     userForm.clearErrors();
     modalOpen.value = true;
 };
@@ -56,8 +56,9 @@ const openEdit = (user) => {
     userForm.email = user.email;
     userForm.password = "";
     userForm.password_confirmation = "";
-    userForm.department_id =
-        user.departments?.[0]?.id ?? props.department?.id ?? "";
+    userForm.department_ids = (user.departments ?? []).map(
+        (department) => department.id,
+    );
     userForm.role_id = user.roles?.[0]?.id ?? "";
     userForm.job_title = user.organizations?.[0]?.pivot?.job_title ?? "";
     modalOpen.value = true;
@@ -200,6 +201,7 @@ const removeUser = async (user) => {
                             >
                                 <th class="px-5 py-3">Utilisateur</th>
                                 <th class="px-4 py-3">Rôles</th>
+                                <th class="px-4 py-3">Départements</th>
                                 <th class="px-4 py-3">Activité</th>
                                 <th class="px-5 py-3 text-right">Actions</th>
                             </tr>
@@ -238,6 +240,19 @@ const removeUser = async (user) => {
                                             class="text-xs text-slate-400"
                                             >Sans rôle</span
                                         >
+                                    </div>
+                                </td>
+                                <td class="px-4 py-4">
+                                    <div class="flex max-w-sm flex-wrap gap-1">
+                                        <span
+                                            v-for="item in user.departments"
+                                            :key="item.id"
+                                            class="rounded-full bg-cyan-50 px-2.5 py-1 text-[10px] font-bold text-cyan-700"
+                                        >{{ item.name }}</span>
+                                        <span
+                                            v-if="!user.departments.length"
+                                            class="text-xs text-slate-400"
+                                        >Sans département</span>
                                     </div>
                                 </td>
                                 <td class="px-4 py-4 text-xs text-slate-500">
@@ -317,43 +332,28 @@ const removeUser = async (user) => {
                     </p>
                 </div>
                 <div class="grid gap-4 sm:grid-cols-2">
-                    <label class="grid gap-1.5 text-sm font-bold text-slate-700"
+                    <label class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >Nom complet<input
                             v-model="userForm.name"
                             required
-                            class="rounded-xl border-slate-200" /><InputError
+                            class="w-full min-w-0 rounded-xl border-slate-200" /><InputError
                             :message="userForm.errors.name" /></label
                     ><label
-                        class="grid gap-1.5 text-sm font-bold text-slate-700"
+                        class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >E-mail<input
                             v-model="userForm.email"
                             required
                             type="email"
-                            class="rounded-xl border-slate-200" /><InputError
+                            class="w-full min-w-0 rounded-xl border-slate-200" /><InputError
                             :message="userForm.errors.email"
                     /></label>
                 </div>
-                <div class="grid gap-4 sm:grid-cols-3">
-                    <label class="grid gap-1.5 text-sm font-bold text-slate-700"
-                        >Département<select
-                            v-model="userForm.department_id"
-                            required
-                            class="rounded-xl border-slate-200"
-                        >
-                            <option
-                                v-for="item in departments"
-                                :key="item.id"
-                                :value="item.id"
-                            >
-                                {{ item.name }}
-                            </option></select
-                        ><InputError
-                            :message="userForm.errors.department_id" /></label
-                    ><label
-                        class="grid gap-1.5 text-sm font-bold text-slate-700"
+                <div class="grid min-w-0 gap-4 md:grid-cols-2">
+                    <label
+                        class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >Rôle<select
                             v-model="userForm.role_id"
-                            class="rounded-xl border-slate-200"
+                            class="w-full min-w-0 rounded-xl border-slate-200"
                         >
                             <option value="">Sans rôle</option>
                             <option
@@ -366,31 +366,53 @@ const removeUser = async (user) => {
                         ><InputError
                             :message="userForm.errors.role_id" /></label
                     ><label
-                        class="grid gap-1.5 text-sm font-bold text-slate-700"
+                        class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >Fonction<input
                             v-model="userForm.job_title"
-                            class="rounded-xl border-slate-200" /><InputError
+                            class="w-full min-w-0 rounded-xl border-slate-200" /><InputError
                             :message="userForm.errors.job_title"
                     /></label>
                 </div>
+                <fieldset class="grid gap-3 rounded-xl border border-slate-200 p-4">
+                    <legend class="px-1 text-sm font-bold text-slate-700">
+                        Départements gérés / accessibles
+                    </legend>
+                    <div class="grid gap-2 sm:grid-cols-2">
+                        <label
+                            v-for="item in departments"
+                            :key="item.id"
+                            class="flex cursor-pointer items-center gap-3 rounded-xl border p-3 text-sm font-semibold transition"
+                            :class="userForm.department_ids.includes(item.id) ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-slate-200 text-slate-600'"
+                        >
+                            <input
+                                v-model="userForm.department_ids"
+                                type="checkbox"
+                                :value="item.id"
+                                class="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                            />
+                            {{ item.name }}
+                        </label>
+                    </div>
+                    <InputError :message="userForm.errors.department_ids" />
+                </fieldset>
                 <div class="grid gap-4 sm:grid-cols-2">
-                    <label class="grid gap-1.5 text-sm font-bold text-slate-700"
+                    <label class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >Mot de passe {{ editingUser ? "(optionnel)" : ""
                         }}<input
                             v-model="userForm.password"
                             :required="!editingUser"
                             type="password"
-                            class="rounded-xl border-slate-200" /><InputError
+                            class="w-full min-w-0 rounded-xl border-slate-200" /><InputError
                             :message="userForm.errors.password" /></label
                     ><label
-                        class="grid gap-1.5 text-sm font-bold text-slate-700"
+                        class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700"
                         >Confirmation<input
                             v-model="userForm.password_confirmation"
                             :required="
                                 !editingUser || Boolean(userForm.password)
                             "
                             type="password"
-                            class="rounded-xl border-slate-200"
+                            class="w-full min-w-0 rounded-xl border-slate-200"
                     /></label>
                 </div>
                 <div

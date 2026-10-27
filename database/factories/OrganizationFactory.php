@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Models\Organization;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
 
 /**
  * @extends Factory<Organization>
@@ -18,7 +19,11 @@ class OrganizationFactory extends Factory
     public function definition(): array
     {
         return [
-            //
+            'name' => fake()->company(),
+            'slug' => fake()->unique()->slug(3).'-'.Str::lower(Str::random(6)),
+            'timezone' => 'Africa/Casablanca',
+            'locale' => 'fr',
+            'is_active' => true,
         ];
     }
 }

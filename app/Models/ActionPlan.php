@@ -14,6 +14,8 @@ class ActionPlan extends Model
     protected $fillable = [
         'organization_id',
         'department_id',
+        'planning_year_id',
+        'rollover_source_id',
         'created_by',
         'name',
         'code',
@@ -44,6 +46,21 @@ class ActionPlan extends Model
     public function department(): BelongsTo
     {
         return $this->belongsTo(Department::class);
+    }
+
+    public function planningYear(): BelongsTo
+    {
+        return $this->belongsTo(PlanningYear::class);
+    }
+
+    public function rolloverSource(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'rollover_source_id');
+    }
+
+    public function rolloverCopies(): HasMany
+    {
+        return $this->hasMany(self::class, 'rollover_source_id');
     }
 
     public function creator(): BelongsTo

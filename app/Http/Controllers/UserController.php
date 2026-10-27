@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Department;
 use App\Models\Organization;
 use App\Models\User;
+use App\Services\WorkContextDepartmentService;
 use App\Support\CurrentDepartmentAuthorizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -24,7 +25,8 @@ class UserController extends Controller
     private const MAX_PER_PAGE = 100;
 
     public function __construct(
-        private readonly CurrentDepartmentAuthorizer $departmentAuthorizer
+        private readonly CurrentDepartmentAuthorizer $departmentAuthorizer,
+        private readonly WorkContextDepartmentService $departmentAccess,
     ) {}
 
     /**
@@ -75,15 +77,8 @@ class UserController extends Controller
         Request $request,
         Organization $organization
     ): Department {
-        $departments = $request->user()
-            ->departments()
-            ->where(
-                'departments.organization_id',
-                $organization->id
-            )
-            ->wherePivot('is_active', true)
-            ->orderBy('departments.name')
-            ->get();
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($request->user(), $organization->id);
 
         abort_if(
             $departments->isEmpty(),
@@ -148,7 +143,7 @@ class UserController extends Controller
     ): User {
         $context = $this->getContext($request);
 
-        return User::query()
+        $query = User::query()
             ->whereKey($userId)
 
             ->whereHas(
@@ -161,21 +156,18 @@ class UserController extends Controller
                         )
                         ->where('organization_members.is_active', true);
                 }
-            )
+            );
 
-            ->whereHas(
+        if (! $this->departmentAccess->isDirectorGeneral($request->user(), $context['organization']->id)) {
+            $query->whereHas(
                 'departments',
-                function ($query) use ($context) {
-                    $query
-                        ->where(
-                            'departments.id',
-                            $context['department']->id
-                        )
-                        ->where('department_members.is_active', true);
-                }
-            )
+                fn ($departmentQuery) => $departmentQuery
+                    ->where('departments.id', $context['department']->id)
+                    ->where('department_members.is_active', true)
+            );
+        }
 
-            ->firstOrFail();
+        return $query->firstOrFail();
     }
 
     /**
@@ -206,6 +198,8 @@ class UserController extends Controller
             ],
         ]);
 
+        $isDirectorGeneral = $this->departmentAccess
+            ->isDirectorGeneral($request->user(), $context['organization']->id);
         $users = User::query()
 
             ->whereHas(
@@ -220,17 +214,12 @@ class UserController extends Controller
                 }
             )
 
-            ->whereHas(
+            ->when(! $isDirectorGeneral, fn ($query) => $query->whereHas(
                 'departments',
-                function ($query) use ($context) {
-                    $query
-                        ->where(
-                            'departments.id',
-                            $context['department']->id
-                        )
-                        ->where('department_members.is_active', true);
-                }
-            )
+                fn ($departmentQuery) => $departmentQuery
+                    ->where('departments.id', $context['department']->id)
+                    ->where('department_members.is_active', true)
+            ))
 
             ->when(
                 ! empty($validated['search']),
@@ -292,10 +281,10 @@ class UserController extends Controller
                 },
 
                 'departments' => function ($query) use ($context) {
-                    $query->where(
-                        'departments.id',
-                        $context['department']->id
-                    );
+                    $query->where('departments.organization_id', $context['organization']->id)
+                        ->where('department_members.is_active', true)
+                        ->orderByDesc('department_members.is_primary')
+                        ->orderBy('departments.name');
                 },
 
                 'roles' => function ($query) use ($context) {
@@ -398,8 +387,14 @@ class UserController extends Controller
             ],
 
             'department_id' => [
-                'required',
+                'required_without:department_ids',
                 'integer',
+                Rule::exists('departments', 'id')->where('organization_id', $context['organization']->id),
+            ],
+            'department_ids' => ['required_without:department_id', 'array', 'min:1'],
+            'department_ids.*' => [
+                'integer',
+                'distinct',
                 Rule::exists('departments', 'id')->where('organization_id', $context['organization']->id),
             ],
 
@@ -462,12 +457,22 @@ class UserController extends Controller
                     'is_active' => true,
                 ]);
 
-                $user->departments()->attach($data['department_id'], [
-                    'is_manager' => false,
-                    'is_primary' => true,
-                    'is_active' => true,
-                    'joined_at' => now(),
-                ]);
+                $departmentIds = collect($data['department_ids'] ?? [$data['department_id']])
+                    ->map(fn ($departmentId): int => (int) $departmentId)
+                    ->unique()
+                    ->values();
+                $user->departments()->attach($departmentIds->mapWithKeys(fn (int $departmentId, int $index): array => [
+                    $departmentId => [
+                        'is_manager' => in_array(
+                            $context['organization']->roles()->find($data['role_id'] ?? null)?->slug,
+                            ['director', 'deputy-director', 'department-manager'],
+                            true,
+                        ),
+                        'is_primary' => $index === 0,
+                        'is_active' => true,
+                        'joined_at' => now(),
+                    ],
+                ])->all());
 
                 if (! empty($data['role_id'])) {
                     $user->roles()->attach($data['role_id'], [
@@ -635,8 +640,14 @@ class UserController extends Controller
 
             'department_id' => [
                 'sometimes',
-                'required',
+                'required_without:department_ids',
                 'integer',
+                Rule::exists('departments', 'id')->where('organization_id', $context['organization']->id),
+            ],
+            'department_ids' => ['sometimes', 'required', 'array', 'min:1'],
+            'department_ids.*' => [
+                'integer',
+                'distinct',
                 Rule::exists('departments', 'id')->where('organization_id', $context['organization']->id),
             ],
 
@@ -702,23 +713,26 @@ class UserController extends Controller
                     ]);
                 }
 
-                if (array_key_exists('department_id', $data)) {
+                if (array_key_exists('department_id', $data) || array_key_exists('department_ids', $data)) {
+                    $selectedDepartmentIds = collect($data['department_ids'] ?? [$data['department_id']])
+                        ->map(fn ($departmentId): int => (int) $departmentId)
+                        ->unique()
+                        ->values();
                     $organizationDepartmentIds = Department::query()
                         ->where('organization_id', $context['organization']->id)
                         ->pluck('id');
-                    $user->departments()->detach(
-                        $organizationDepartmentIds->reject(
-                            fn ($departmentId) => (int) $departmentId === (int) $data['department_id']
-                        )
-                    );
-                    $user->departments()->syncWithoutDetaching([
-                        $data['department_id'] => [
-                            'is_manager' => false,
-                            'is_primary' => true,
+                    $user->departments()->detach($organizationDepartmentIds);
+                    $roleSlug = array_key_exists('role_id', $data)
+                        ? $context['organization']->roles()->find($data['role_id'])?->slug
+                        : $user->roles()->where('user_roles.organization_id', $context['organization']->id)->value('slug');
+                    $user->departments()->attach($selectedDepartmentIds->mapWithKeys(fn (int $departmentId, int $index): array => [
+                        $departmentId => [
+                            'is_manager' => in_array($roleSlug, ['director', 'deputy-director', 'department-manager'], true),
+                            'is_primary' => $index === 0,
                             'is_active' => true,
                             'joined_at' => now(),
                         ],
-                    ]);
+                    ])->all());
                 }
 
                 if (array_key_exists('role_id', $data)) {

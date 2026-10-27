@@ -1,11 +1,13 @@
 import { computed, ref } from 'vue';
 
 const DEFAULT_MESSAGE = 'Chargement en cours…';
-const MINIMUM_VISIBLE_DURATION = 420;
+// Keep the branded transition visible without making the interface feel blocked.
+const MINIMUM_VISIBLE_DURATION = 1000;
 
 const activeOperations = new Map();
 const isVisible = ref(false);
 const message = ref(DEFAULT_MESSAGE);
+const cycle = ref(0);
 let visibleSince = 0;
 let hideTimer;
 
@@ -16,13 +18,18 @@ const refreshMessage = () => {
 
 const startLoading = (loadingMessage = DEFAULT_MESSAGE) => {
     const operation = Symbol('global-loader-operation');
+    const startsNewCycle = activeOperations.size === 0;
 
     clearTimeout(hideTimer);
     activeOperations.set(operation, loadingMessage);
     refreshMessage();
 
-    if (!isVisible.value) {
+    if (startsNewCycle) {
         visibleSince = Date.now();
+        cycle.value += 1;
+    }
+
+    if (!isVisible.value) {
         isVisible.value = true;
     }
 
@@ -63,6 +70,7 @@ const pulseLoading = (loadingMessage, duration = MINIMUM_VISIBLE_DURATION) => {
 
 export const useGlobalLoader = () => ({
     isLoading: computed(() => isVisible.value),
+    loaderCycle: computed(() => cycle.value),
     loaderMessage: computed(() => message.value),
     pulseLoading,
     startLoading,

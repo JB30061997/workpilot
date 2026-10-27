@@ -13,6 +13,8 @@ const props = defineProps({
     action_plans: Object,
     filters: Object,
     statuses: Array,
+    planningYears: Array,
+    currentPlanningYearId: Number,
     openActionPlanId: Number,
 });
 
@@ -37,10 +39,12 @@ const expandedConsultationActionId = ref(null);
 const filterForm = useForm({
     search: props.filters?.search ?? '',
     status: props.filters?.status ?? '',
+    planning_year_id: props.filters?.planning_year_id ?? '',
 });
 
 const planForm = useForm({
     name: '',
+    planning_year_id: props.currentPlanningYearId ?? '',
     code: '',
     description: '',
     start_date: '',
@@ -319,11 +323,22 @@ const formatDateTime = (value) => value
 
 const userInitial = (name) => name?.trim().charAt(0).toUpperCase() || '?';
 
+const applyPlanYearDates = () => {
+    const year = props.planningYears.find(
+        (item) => Number(item.id) === Number(planForm.planning_year_id),
+    );
+
+    planForm.start_date = dateValue(year?.start_date);
+    planForm.end_date = dateValue(year?.end_date);
+};
+
 const openCreatePlan = () => {
     editingPlan.value = null;
     planForm.reset();
     planForm.clearErrors();
     planForm.status = 'draft';
+    planForm.planning_year_id = props.currentPlanningYearId ?? '';
+    applyPlanYearDates();
     planForm.progress = 0;
     planForm.is_active = true;
     planModalOpen.value = true;
@@ -333,6 +348,7 @@ const openEditPlan = (plan) => {
     editingPlan.value = plan;
     planForm.clearErrors();
     planForm.name = plan.name;
+    planForm.planning_year_id = plan.planning_year_id ?? props.currentPlanningYearId ?? '';
     planForm.code = plan.code ?? '';
     planForm.description = plan.description ?? '';
     planForm.start_date = dateValue(plan.start_date);
@@ -438,25 +454,27 @@ const removeAxis = async (axis) => {
                     <form class="flex flex-wrap items-end gap-3 border-b border-slate-200 p-4" @submit.prevent="applyFilters">
                         <label class="min-w-[210px] flex-1 text-xs font-semibold text-slate-600">Rechercher<input v-model="filterForm.search" type="search" placeholder="Nom ou code du plan..." class="wp-field mt-1" /></label>
                         <label class="w-full text-xs font-semibold text-slate-600 sm:w-52">Statut<select v-model="filterForm.status" class="wp-field mt-1"><option value="">Tous les statuts</option><option v-for="status in statuses" :key="status" :value="status">{{ statusLabels[status] }}</option></select></label>
+                        <label class="w-full text-xs font-semibold text-slate-600 sm:w-52">Année<select v-model="filterForm.planning_year_id" class="wp-field mt-1"><option value="">Toutes les années</option><option v-for="year in planningYears" :key="year.id" :value="year.id">{{ year.label }}</option></select></label>
                         <button class="wp-btn wp-btn-primary" type="submit">Filtrer</button><button type="button" class="wp-btn wp-btn-secondary" @click="resetFilters">Réinitialiser</button>
                     </form>
                     <div class="overflow-x-auto">
                         <table class="wp-table min-w-[1050px]">
-                            <thead><tr><th>Plan d’action</th><th>Code</th><th>Statut</th><th>Début</th><th>Échéance</th><th>Axes</th><th>Projets</th><th>Actions</th><th>Progression</th><th class="text-right">Actions</th></tr></thead>
+                            <thead><tr><th>Plan d’action</th><th>Code</th><th>Année</th><th>Statut</th><th>Début</th><th>Échéance</th><th>Axes</th><th>Projets</th><th>Actions</th><th>Progression</th><th class="text-right">Actions</th></tr></thead>
                             <tbody>
                                 <template v-for="plan in action_plans.data" :key="plan.id">
                                     <tr>
                                         <td class="max-w-[250px]"><div class="font-semibold text-slate-900">{{ plan.name }}</div><div v-if="plan.description" class="mt-1 truncate text-xs text-slate-500">{{ plan.description }}</div></td>
                                         <td class="font-mono text-xs font-semibold text-blue-700">{{ plan.code || '—' }}</td>
+                                        <td class="whitespace-nowrap font-semibold text-violet-700">{{ plan.planning_year?.label || '—' }}</td>
                                         <td><span class="wp-status" :class="statusClasses[plan.status]">{{ statusLabels[plan.status] || plan.status }}</span></td>
                                         <td class="whitespace-nowrap text-sky-800">{{ formatDate(plan.start_date) }}</td><td class="whitespace-nowrap font-medium text-amber-800">{{ formatDate(plan.end_date) }}</td>
                                         <td class="text-center font-semibold">{{ plan.axes_count }}</td><td class="text-center font-semibold">{{ plan.projects_count }}</td><td class="text-center font-semibold">{{ plan.actions_count }}</td>
                                         <td><div class="flex min-w-[110px] items-center gap-2"><div class="h-1.5 flex-1 overflow-hidden bg-slate-200"><div class="h-full" :class="progressColor(plan.progress)" :style="{ width: `${Math.min(100, Math.max(0, Number(plan.progress)||0))}%` }"></div></div><span class="text-xs font-bold text-blue-700">{{ plan.progress }}%</span></div></td>
                                         <td><div class="flex justify-end gap-1"><button type="button" class="wp-icon-btn text-blue-700" title="Consulter" aria-label="Consulter" @click="openConsultation(plan)"><Eye class="h-4 w-4" aria-hidden="true" /></button><button type="button" class="wp-icon-btn text-violet-700" title="Modifier" aria-label="Modifier" @click="openEditPlan(plan)">✎</button><button type="button" class="wp-icon-btn text-emerald-700" title="Ajouter un axe" aria-label="Ajouter un axe" @click="openCreateAxis(plan)">＋</button><button type="button" class="wp-icon-btn text-rose-700" title="Supprimer" aria-label="Supprimer" @click="removePlan(plan)">✕</button></div></td>
                                     </tr>
-                                    <tr v-if="plan.axes?.length" class="bg-slate-50/80"><td colspan="10" class="!px-5 !py-2"><details class="group"><summary class="cursor-pointer text-xs font-bold text-slate-600 hover:text-blue-700">▸ Axes stratégiques ({{ plan.axes.length }})</summary><div class="mt-3 overflow-x-auto border border-slate-200 bg-white"><table class="wp-table min-w-[700px]"><thead><tr><th>Axe</th><th>Code</th><th>Projets</th><th>Actions</th><th class="text-right">Actions</th></tr></thead><tbody><tr v-for="axis in plan.axes" :key="axis.id"><td class="font-semibold">{{ axis.name }}</td><td class="font-mono text-xs">{{ axis.code || '—' }}</td><td>{{ axis.projects_count }}</td><td>{{ axis.actions_count }}</td><td><div class="flex justify-end gap-2"><button type="button" class="wp-icon-btn text-blue-700" title="Modifier l’axe" @click="openEditAxis(axis)">✎</button><button type="button" class="wp-icon-btn text-rose-700" title="Supprimer l’axe" @click="removeAxis(axis)">✕</button></div></td></tr></tbody></table></div></details></td></tr>
+                                    <tr v-if="plan.axes?.length" class="bg-slate-50/80"><td colspan="11" class="!px-5 !py-2"><details class="group"><summary class="cursor-pointer text-xs font-bold text-slate-600 hover:text-blue-700">▸ Axes stratégiques ({{ plan.axes.length }})</summary><div class="mt-3 overflow-x-auto border border-slate-200 bg-white"><table class="wp-table min-w-[700px]"><thead><tr><th>Axe</th><th>Code</th><th>Projets</th><th>Actions</th><th class="text-right">Actions</th></tr></thead><tbody><tr v-for="axis in plan.axes" :key="axis.id"><td class="font-semibold">{{ axis.name }}</td><td class="font-mono text-xs">{{ axis.code || '—' }}</td><td>{{ axis.projects_count }}</td><td>{{ axis.actions_count }}</td><td><div class="flex justify-end gap-2"><button type="button" class="wp-icon-btn text-blue-700" title="Modifier l’axe" @click="openEditAxis(axis)">✎</button><button type="button" class="wp-icon-btn text-rose-700" title="Supprimer l’axe" @click="removeAxis(axis)">✕</button></div></td></tr></tbody></table></div></details></td></tr>
                                 </template>
-                                <tr v-if="!action_plans.data.length"><td colspan="10" class="py-12 text-center text-slate-500">Aucun plan d’action trouvé.</td></tr>
+                                <tr v-if="!action_plans.data.length"><td colspan="11" class="py-12 text-center text-slate-500">Aucun plan d’action trouvé.</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -618,10 +636,11 @@ const removeAxis = async (axis) => {
                 <div><h2 class="text-xl font-bold text-slate-900">{{ editingPlan ? 'Modifier le plan' : 'Nouveau plan d’action' }}</h2><p class="mt-1 text-sm text-slate-500">Définissez les objectifs et la période du plan.</p></div>
                 <div class="grid gap-4 sm:grid-cols-2">
                     <label class="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Nom<input v-model="planForm.name" required class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500" /><InputError :message="planForm.errors.name" /></label>
+                    <label class="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Année du plan<select v-model="planForm.planning_year_id" required class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500" @change="applyPlanYearDates"><option v-for="year in planningYears" :key="year.id" :value="year.id">{{ year.label }} · {{ dateValue(year.start_date) }} → {{ dateValue(year.end_date) }}</option></select><InputError :message="planForm.errors.planning_year_id" /></label>
                     <label v-if="editingPlan" class="grid gap-1.5 text-sm font-medium text-slate-700">Code<input v-model="planForm.code" readonly class="rounded border-slate-200 bg-slate-50 text-slate-500" /><span class="text-xs text-slate-400">Le code reste stable après la création.</span></label>
                     <label class="grid gap-1.5 text-sm font-medium text-slate-700">Statut<select v-model="planForm.status" class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500"><option v-for="status in statuses" :key="status" :value="status">{{ statusLabels[status] }}</option></select><InputError :message="planForm.errors.status" /></label>
-                    <label class="grid gap-1.5 text-sm font-medium text-slate-700">Début<input v-model="planForm.start_date" type="date" class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500" /><InputError :message="planForm.errors.start_date" /></label>
-                    <label class="grid gap-1.5 text-sm font-medium text-slate-700">Fin<input v-model="planForm.end_date" type="date" class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500" /><InputError :message="planForm.errors.end_date" /></label>
+                    <label class="grid gap-1.5 text-sm font-medium text-slate-700">Début<input v-model="planForm.start_date" readonly type="date" class="rounded border-slate-200 bg-slate-50 text-slate-500" /><InputError :message="planForm.errors.start_date" /></label>
+                    <label class="grid gap-1.5 text-sm font-medium text-slate-700">Fin<input v-model="planForm.end_date" readonly type="date" class="rounded border-slate-200 bg-slate-50 text-slate-500" /><InputError :message="planForm.errors.end_date" /></label>
                     <label class="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Progression — {{ planForm.progress }}%<input v-model.number="planForm.progress" type="range" min="0" max="100" class="accent-blue-600" /><InputError :message="planForm.errors.progress" /></label>
                     <label class="grid gap-1.5 text-sm font-medium text-slate-700 sm:col-span-2">Description<textarea v-model="planForm.description" rows="4" class="rounded border-slate-200 focus:border-blue-500 focus:ring-blue-500"></textarea><InputError :message="planForm.errors.description" /></label>
                     <label class="flex items-center gap-3 text-sm font-medium text-slate-700"><input v-model="planForm.is_active" type="checkbox" class="rounded border-slate-300 text-blue-600" /> Plan actif</label>

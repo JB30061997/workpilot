@@ -11,6 +11,16 @@ class CurrentDepartmentAuthorizer
         int $organizationId,
         int $departmentId
     ): bool {
+        $isDirectorGeneral = $user->roles()
+            ->where('user_roles.organization_id', $organizationId)
+            ->where('roles.slug', 'director')
+            ->where('roles.is_active', true)
+            ->exists();
+
+        if ($isDirectorGeneral) {
+            return true;
+        }
+
         $managesDepartment = $user->departmentMemberships()
             ->where('department_id', $departmentId)
             ->where('is_manager', true)
@@ -24,7 +34,7 @@ class CurrentDepartmentAuthorizer
 
         return $user->roles()
             ->where('user_roles.organization_id', $organizationId)
-            ->whereIn('roles.slug', ['administrator', 'director'])
+            ->whereIn('roles.slug', ['administrator', 'director', 'deputy-director', 'department-manager'])
             ->exists();
     }
 

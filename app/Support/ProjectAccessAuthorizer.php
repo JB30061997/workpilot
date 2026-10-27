@@ -43,6 +43,14 @@ class ProjectAccessAuthorizer
         }
 
         return (int) $project->manager_id === (int) $user->id
+            || $project->departmentResponsibles()
+                ->where('department_id', $departmentId)
+                ->where('user_id', $user->id)
+                ->exists()
+            || $project->projectMembers()
+                ->where('user_id', $user->id)
+                ->where('role', 'manager')
+                ->exists()
             || $this->departmentAuthorizer->canManageAccess(
                 $user,
                 $organizationId,

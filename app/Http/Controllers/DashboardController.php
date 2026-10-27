@@ -12,6 +12,7 @@ use App\Models\Task;
 use App\Models\TaskPlanning;
 use App\Models\User;
 use App\Models\WorkSession;
+use App\Services\WorkContextDepartmentService;
 use App\Support\ProjectAccessAuthorizer;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class DashboardController extends Controller
 {
     public function __construct(
         private readonly ProjectAccessAuthorizer $projectAuthorizer,
+        private readonly WorkContextDepartmentService $departmentAccess,
     ) {}
 
     /**
@@ -80,11 +82,8 @@ class DashboardController extends Controller
         |--------------------------------------------------------------------------
         */
 
-        $departments = $user->departments()
-            ->where('departments.organization_id', $organizationId)
-            ->wherePivot('is_active', true)
-            ->orderBy('departments.name')
-            ->get();
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($user, (int) $organizationId);
 
         abort_if(
             $departments->isEmpty(),
@@ -179,7 +178,7 @@ class DashboardController extends Controller
                 },
                 'projects' => function ($query) {
                     $query
-                        ->select(['id', 'action_plan_id', 'name', 'code', 'progress', 'status'])
+                        ->select(['id', 'action_plan_id', 'name', 'code', 'progress', 'status', 'start_date', 'due_date'])
                         ->withMin('actions', 'actual_start_date')
                         ->withMax('actions', 'actual_end_date')
                         ->orderBy('name');
@@ -207,9 +206,14 @@ class DashboardController extends Controller
                         ->map(function ($project) {
                             $actualStartDate = $project->actions_min_actual_start_date;
                             $actualEndDate = $project->actions_max_actual_end_date;
-                            $actualDurationDays = $actualStartDate && $actualEndDate
-                                ? CarbonImmutable::parse($actualStartDate)->diffInDays(CarbonImmutable::parse($actualEndDate)) + 1
+                            $hasCompleteActualDates = $actualStartDate && $actualEndDate;
+                            $chartStartDate = $hasCompleteActualDates ? $actualStartDate : $project->start_date;
+                            $chartEndDate = $hasCompleteActualDates ? $actualEndDate : $project->due_date;
+                            $chartDurationDays = $chartStartDate && $chartEndDate
+                                ? CarbonImmutable::parse($chartStartDate)->diffInDays(CarbonImmutable::parse($chartEndDate)) + 1
                                 : 0;
+                            $chartStartDate = $chartStartDate ? CarbonImmutable::parse($chartStartDate)->toDateString() : null;
+                            $chartEndDate = $chartEndDate ? CarbonImmutable::parse($chartEndDate)->toDateString() : null;
 
                             return [
                                 'id' => $project->id,
@@ -219,7 +223,11 @@ class DashboardController extends Controller
                                 'status' => $project->status,
                                 'actual_start_date' => $actualStartDate ? CarbonImmutable::parse($actualStartDate)->toDateString() : null,
                                 'actual_end_date' => $actualEndDate ? CarbonImmutable::parse($actualEndDate)->toDateString() : null,
-                                'actual_duration_days' => $actualDurationDays,
+                                'actual_duration_days' => $hasCompleteActualDates ? $chartDurationDays : 0,
+                                'chart_start_date' => $chartStartDate,
+                                'chart_end_date' => $chartEndDate,
+                                'chart_duration_days' => $chartDurationDays,
+                                'chart_date_source' => $hasCompleteActualDates ? 'actual' : 'planned',
                             ];
                         })
                         ->values(),

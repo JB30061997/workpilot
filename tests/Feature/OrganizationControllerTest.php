@@ -12,6 +12,33 @@ class OrganizationControllerTest extends TestCase
 {
     use RefreshDatabase;
 
+    public function test_new_organization_receives_default_roles_and_assigns_administrator_to_owner(): void
+    {
+        $owner = User::factory()->create();
+
+        $response = $this
+            ->actingAs($owner)
+            ->post(route('organizations.store'), [
+                'name' => 'Nouvelle société',
+                'is_active' => true,
+            ]);
+
+        $response->assertSessionHasNoErrors()->assertRedirect();
+        $organization = Organization::query()->where('slug', 'nouvelle-societe')->firstOrFail();
+
+        $this->assertSame(6, $organization->roles()->count());
+        $this->assertDatabaseHas('roles', [
+            'organization_id' => $organization->id,
+            'slug' => 'deputy-director',
+            'is_system' => true,
+        ]);
+        $this->assertDatabaseHas('user_roles', [
+            'user_id' => $owner->id,
+            'organization_id' => $organization->id,
+            'role_id' => $organization->roles()->where('slug', 'administrator')->value('id'),
+        ]);
+    }
+
     public function test_director_can_update_an_accessible_organization(): void
     {
         $director = User::factory()->create();

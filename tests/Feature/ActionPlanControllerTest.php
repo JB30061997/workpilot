@@ -8,7 +8,9 @@ use App\Models\ActionPlan;
 use App\Models\Axis;
 use App\Models\Department;
 use App\Models\Organization;
+use App\Models\PlanningYear;
 use App\Models\Project;
+use App\Models\Role;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -48,8 +50,41 @@ class ActionPlanControllerTest extends TestCase
             ->where('action_plans.data.0.axes.0.name', 'Visible Axis'));
     }
 
+    public function test_director_general_can_view_action_plans_from_an_unassigned_department(): void
+    {
+        $director = User::factory()->create();
+        [$organization, $memberDepartment] = $this->createContext($director, 'director');
+        $otherDepartment = Department::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Finance',
+        ]);
+        $role = Role::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'DG — Directeur Général',
+            'slug' => 'director',
+            'is_active' => true,
+        ]);
+        $director->roles()->attach($role, ['organization_id' => $organization->id]);
+        $this->createPlan($director, $organization, $memberDepartment, 'Hidden Department Plan');
+        $visiblePlan = $this->createPlan($director, $organization, $otherDepartment, 'Finance Plan');
+
+        $response = $this
+            ->actingAs($director)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_department_id' => $otherDepartment->id,
+            ])
+            ->get(route('action-plans.index'));
+
+        $response->assertInertia(fn (Assert $page) => $page
+            ->where('department.id', $otherDepartment->id)
+            ->has('action_plans.data', 1)
+            ->where('action_plans.data.0.id', $visiblePlan->id));
+    }
+
     public function test_valid_payload_creates_plan_in_selected_context(): void
     {
+        $this->travelTo('2026-10-26 10:00:00');
         $user = User::factory()->create();
         [$organization, $department] = $this->createContext($user, 'create');
 
@@ -78,6 +113,40 @@ class ActionPlanControllerTest extends TestCase
             'code' => 'DIGITAL-PLAN',
             'status' => 'active',
             'progress' => 30,
+            'start_date' => '2026-09-01 00:00:00',
+            'end_date' => '2027-08-31 00:00:00',
+        ]);
+    }
+
+    public function test_plan_cannot_use_a_planning_year_from_another_organization(): void
+    {
+        $user = User::factory()->create();
+        [$organization, $department] = $this->createContext($user, 'selected-year');
+        [$otherOrganization] = $this->createContext($user, 'other-year');
+        $otherYear = PlanningYear::query()->create([
+            'organization_id' => $otherOrganization->id,
+            'label' => '2026-2027',
+            'start_date' => '2026-09-01',
+            'end_date' => '2027-08-31',
+        ]);
+
+        $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_department_id' => $department->id,
+            ])
+            ->post(route('action-plans.store'), [
+                'name' => 'Cross tenant plan',
+                'planning_year_id' => $otherYear->id,
+                'status' => 'active',
+                'progress' => 0,
+                'is_active' => true,
+            ])
+            ->assertNotFound();
+
+        $this->assertDatabaseMissing('action_plans', [
+            'organization_id' => $organization->id,
+            'name' => 'Cross tenant plan',
         ]);
     }
 

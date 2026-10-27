@@ -1,6 +1,7 @@
 
 <?php
 
+use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\ActionCommentController;
 use App\Http\Controllers\ActionController;
 use App\Http\Controllers\ActionPlanController;
@@ -34,6 +35,8 @@ use App\Http\Controllers\TaskStatusController;
 use App\Http\Controllers\TimeSlotController;
 use App\Http\Controllers\TimeSlotMemberController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\WorkflowAIController;
+use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\WorkSessionController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -70,6 +73,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])
         ->name('dashboard');
+
+    Route::get('/workflows', [WorkflowController::class, 'library'])
+        ->name('workflows.library');
 
     /*
     |--------------------------------------------------------------------------
@@ -137,6 +143,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/referential', [ReferentialController::class, 'index'])
         ->name('referential.index');
 
+    Route::get('/access-control', [AccessControlController::class, 'index'])
+        ->name('access-control.index');
+
     /*
     |--------------------------------------------------------------------------
     | Project Chat - Group Discussions
@@ -160,6 +169,11 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ProjectChatController::class,
         'store',
     ])->name('project-chat.store');
+
+    Route::delete('/project-chat/projects/{project}/messages/{message}', [
+        ProjectChatController::class,
+        'destroy',
+    ])->name('project-chat.destroy');
 
     // Marquer les messages comme lus
     Route::post('/project-chat/projects/{project}/read', [
@@ -327,6 +341,19 @@ Route::middleware('auth')->group(function () {
 
     Route::delete('/profile', [ProfileController::class, 'destroy'])
         ->name('profile.destroy');
+});
+
+Route::middleware(['auth', 'verified'])->prefix('projects/{project}/workflows')->name('workflows.')->group(function () {
+    Route::get('/', [WorkflowController::class, 'index'])->name('index');
+    Route::post('/', [WorkflowController::class, 'store'])->name('store');
+    Route::get('/{workflow}', [WorkflowController::class, 'edit'])->name('edit');
+    Route::put('/{workflow}', [WorkflowController::class, 'update'])->name('update');
+    Route::post('/{workflow}/ai/generate', [WorkflowAIController::class, 'generate'])
+        ->middleware('throttle:workflow-ai')
+        ->name('ai.generate');
+    Route::post('/{workflow}/publish', [WorkflowController::class, 'publish'])->name('publish');
+    Route::post('/{workflow}/duplicate', [WorkflowController::class, 'duplicate'])->name('duplicate');
+    Route::delete('/{workflow}', [WorkflowController::class, 'destroy'])->name('destroy');
 });
 
 /*

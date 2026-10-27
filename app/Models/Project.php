@@ -103,9 +103,19 @@ class Project extends Model
         ])->withTimestamps();
     }
 
+    public function departmentResponsibles(): HasMany
+    {
+        return $this->hasMany(ProjectDepartmentResponsible::class);
+    }
+
     public function actions(): HasMany
     {
         return $this->hasMany(Action::class);
+    }
+
+    public function workflows(): HasMany
+    {
+        return $this->hasMany(WorkflowDefinition::class);
     }
 
     public function recalculateProgress(): void

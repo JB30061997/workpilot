@@ -205,7 +205,7 @@ const openCreateForm = (statusId = null) => {
 
 const openEditForm = (task) => {
     editingTask.value = task;
-    showAdvancedOptions.value = true;
+    showAdvancedOptions.value = false;
     taskForm.clearErrors();
     taskForm.title = task.title ?? "";
     taskForm.description = task.description ?? "";
@@ -910,13 +910,13 @@ const deleteTask = async (task) => {
             </div>
         </div>
 
-        <Modal :show="isFormOpen" max-width="6xl" @close="closeForm">
+        <Modal :show="isFormOpen" max-width="5xl" @close="closeForm">
             <form
-                class="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden bg-white"
+                class="flex h-[min(90dvh,840px)] max-h-[calc(100dvh-1.5rem)] flex-col overflow-hidden bg-white"
                 @submit.prevent="submitTask"
             >
                 <div
-                    class="relative flex shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-slate-200 bg-white px-5 py-4 sm:px-6"
+                    class="relative flex shrink-0 items-center justify-between gap-4 overflow-hidden border-b border-slate-200 bg-white px-5 py-3.5 sm:px-6"
                 >
                     <div class="relative flex min-w-0 items-center gap-3">
                         <span
@@ -963,7 +963,7 @@ const deleteTask = async (task) => {
                 </div>
 
                 <div
-                    class="grid min-h-0 flex-1 gap-x-4 gap-y-3 overflow-y-auto bg-slate-50/60 p-4 sm:grid-cols-2 sm:p-6 lg:grid-cols-4"
+                    class="task-modal-scroll grid min-h-0 flex-1 content-start gap-x-4 gap-y-3 overflow-y-auto bg-slate-50/60 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4"
                 >
                     <label
                         class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700 sm:col-span-2 lg:col-span-4"
@@ -985,16 +985,21 @@ const deleteTask = async (task) => {
                     <label
                         class="grid min-w-0 gap-1.5 text-sm font-bold text-slate-700 sm:col-span-2"
                     >
-                        <span class="flex items-center gap-2"
+                        <span class="flex min-w-0 items-center gap-2"
                             ><span
                                 class="grid h-6 w-6 place-items-center rounded-lg bg-blue-100 text-[10px] font-black text-blue-700"
                                 >1</span
                             >
-                            Projet</span
+                            <span>Projet</span>
+                            <span
+                                v-if="selectedProject?.code"
+                                class="min-w-0 truncate rounded-md bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold text-slate-500"
+                                :title="selectedProject.code"
+                            >{{ selectedProject.code }}</span></span
                         >
                         <select
                             v-model="taskForm.project_id"
-                            class="h-11 w-full min-w-0 max-w-full truncate rounded-xl border-slate-200 bg-white px-3 font-semibold text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            class="h-11 w-full min-w-0 max-w-full truncate rounded-xl border-slate-200 bg-white px-3 text-sm font-semibold text-slate-800 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                         >
                             <option value="">Sans projet</option>
                             <option
@@ -1002,8 +1007,7 @@ const deleteTask = async (task) => {
                                 :key="project.id"
                                 :value="project.id"
                             >
-                                {{ project.code ? `${project.code} · ` : ""
-                                }}{{ project.name }}
+                                {{ project.name }}
                             </option>
                         </select>
                         <InputError :message="taskForm.errors.project_id" />
@@ -1045,7 +1049,7 @@ const deleteTask = async (task) => {
                     </label>
                     <div
                         v-if="selectedProject"
-                        class="flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-500 sm:col-span-2 lg:col-span-4"
+                        class="flex min-w-0 items-center gap-1.5 overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 sm:col-span-2 lg:col-span-4"
                     >
                         <span class="font-bold text-slate-700"
                             >Rattachement :</span
@@ -1054,7 +1058,7 @@ const deleteTask = async (task) => {
                             class="rounded-md bg-blue-50 px-2 py-1 text-blue-700"
                             >Plan</span
                         >
-                        <span>{{
+                        <span class="shrink-0">{{
                             selectedProject?.action_plan?.name ?? "Non rattaché"
                         }}</span>
                         <span class="text-slate-300">→</span>
@@ -1062,7 +1066,7 @@ const deleteTask = async (task) => {
                             class="rounded-md bg-violet-50 px-2 py-1 text-violet-700"
                             >Axe</span
                         >
-                        <span>{{
+                        <span class="shrink-0">{{
                             selectedProject?.axis?.name ?? "Non rattaché"
                         }}</span>
                         <span class="text-slate-300">→</span>
@@ -1070,7 +1074,7 @@ const deleteTask = async (task) => {
                             class="rounded-md bg-slate-200 px-2 py-1 text-slate-700"
                             >Projet</span
                         >
-                        <span>{{
+                        <span class="shrink-0">{{
                             selectedProject?.name ?? "Sans projet"
                         }}</span>
                         <template v-if="selectedAction">
@@ -1079,7 +1083,7 @@ const deleteTask = async (task) => {
                                 class="rounded-md bg-emerald-50 px-2 py-1 text-emerald-700"
                                 >Action</span
                             >
-                            <span>{{ selectedAction.title }}</span>
+                            <span class="shrink-0">{{ selectedAction.title }}</span>
                         </template>
                     </div>
                     <label
@@ -1196,7 +1200,7 @@ const deleteTask = async (task) => {
                             ><span>Progression</span
                             ><strong
                                 class="rounded-full bg-blue-600 px-3 py-1 text-xs text-white"
-                                >{{ taskForm.progress }}%</strong
+                                >{{ Number(taskForm.progress) || 0 }}%</strong
                             ></span
                         >
                         <input
@@ -1223,7 +1227,7 @@ const deleteTask = async (task) => {
                             >
                         </legend>
                         <div
-                            class="grid max-h-32 gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-4"
+                            class="grid max-h-36 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 lg:grid-cols-3"
                         >
                             <label
                                 v-for="member in members"
@@ -1350,6 +1354,21 @@ const deleteTask = async (task) => {
 </template>
 
 <style scoped>
+.task-modal-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+    overscroll-behavior: contain;
+}
+
+.task-modal-scroll::-webkit-scrollbar {
+    width: 7px;
+}
+
+.task-modal-scroll::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background: #cbd5e1;
+}
+
 .column-list-enter-active,
 .column-list-leave-active,
 .task-list-enter-active,

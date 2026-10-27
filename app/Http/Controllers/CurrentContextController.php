@@ -2,12 +2,17 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\WorkContextDepartmentService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 
 class CurrentContextController extends Controller
 {
+    public function __construct(
+        private readonly WorkContextDepartmentService $departmentAccess,
+    ) {}
+
     public function __invoke(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -27,15 +32,11 @@ class CurrentContextController extends Controller
             ]);
         }
 
-        $departments = $request->user()
-            ->departments()
-            ->where('departments.organization_id', $organization->id)
-            ->wherePivot('is_active', true)
-            ->orderByDesc('department_members.is_primary')
-            ->orderBy('departments.name');
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($request->user(), $organization->id);
 
         $department = isset($data['department_id'])
-            ? (clone $departments)->whereKey($data['department_id'])->first()
+            ? $departments->firstWhere('id', (int) $data['department_id'])
             : $departments->first();
 
         if (! $department) {

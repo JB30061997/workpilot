@@ -75,6 +75,11 @@ class Organization extends Model
         return $this->hasMany(ActionPlan::class);
     }
 
+    public function planningYears(): HasMany
+    {
+        return $this->hasMany(PlanningYear::class);
+    }
+
     public function projects(): HasMany
     {
         return $this->hasMany(Project::class);

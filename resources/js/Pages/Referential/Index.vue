@@ -13,6 +13,7 @@ const props = defineProps({
     projectCategories: Array,
     organizationUsers: Array,
     taskStatuses: Array,
+    planningYears: Array,
     roles: Array,
     permissions: Array,
     activeTab: String,
@@ -28,6 +29,11 @@ const tabs = [
         key: "statuses",
         label: "Statuts des tâches",
         count: props.taskStatuses.length,
+    },
+    {
+        key: "years",
+        label: "Années",
+        count: props.planningYears.length,
     },
     {
         key: "organizations",
@@ -59,6 +65,14 @@ const titles = {
     roles: "rôle",
     permissions: "permission",
 };
+
+const formatDate = (date) =>
+    new Intl.DateTimeFormat("fr-FR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+    }).format(new Date(`${date.slice(0, 10)}T00:00:00Z`));
 
 const statusForm = useForm({
     name: "",
@@ -265,7 +279,7 @@ const switchTab = (key) => {
                         </p>
                     </div>
                     <button
-                        v-if="!['roles', 'permissions', 'project-categories'].includes(tab) || canManageAccess"
+                        v-if="tab !== 'years' && (!['roles', 'permissions', 'project-categories'].includes(tab) || canManageAccess)"
                         class="rounded-[4px] bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
                         @click="openCreate"
                     >
@@ -370,6 +384,54 @@ const switchTab = (key) => {
                     >
                         Aucun statut.
                     </p>
+                </div>
+
+                <div
+                    v-else-if="tab === 'years'"
+                    class="grid gap-4 p-5 md:grid-cols-2 xl:grid-cols-3"
+                >
+                    <article
+                        v-for="item in planningYears"
+                        :key="item.id"
+                        class="rounded-2xl border p-5"
+                        :class="item.is_current ? 'border-blue-200 bg-blue-50/60' : 'border-slate-200 bg-white'"
+                    >
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <p class="text-xs font-black uppercase tracking-[0.16em] text-slate-400">
+                                    Année de planification
+                                </p>
+                                <p class="mt-1 text-2xl font-black text-slate-900">
+                                    {{ item.label }}
+                                </p>
+                            </div>
+                            <span
+                                v-if="item.is_current"
+                                class="rounded-full bg-blue-600 px-3 py-1 text-[10px] font-black uppercase tracking-wide text-white"
+                            >
+                                En cours
+                            </span>
+                        </div>
+                        <div class="mt-5 grid grid-cols-2 gap-3">
+                            <div class="rounded-xl border border-slate-200 bg-white p-3">
+                                <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Début</p>
+                                <p class="mt-1 text-sm font-bold text-slate-700">{{ formatDate(item.start_date) }}</p>
+                            </div>
+                            <div class="rounded-xl border border-slate-200 bg-white p-3">
+                                <p class="text-[10px] font-bold uppercase tracking-wide text-slate-400">Fin</p>
+                                <p class="mt-1 text-sm font-bold text-slate-700">{{ formatDate(item.end_date) }}</p>
+                            </div>
+                        </div>
+                        <p class="mt-4 text-xs font-semibold text-slate-500">
+                            {{ item.action_plans_count }} plan(s) d’action
+                        </p>
+                    </article>
+                    <div
+                        v-if="!planningYears.length"
+                        class="p-12 text-center text-sm text-slate-400 md:col-span-2 xl:col-span-3"
+                    >
+                        Aucune année de planification.
+                    </div>
                 </div>
 
                 <div

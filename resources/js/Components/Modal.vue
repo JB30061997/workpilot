@@ -10,7 +10,6 @@ const props = defineProps({
 
 const emit = defineEmits(['close']);
 const { pulseLoading } = useGlobalLoader();
-const dialog = ref(null);
 const showSlot = ref(props.show);
 let closeTimeout;
 
@@ -22,11 +21,9 @@ watch(
             pulseLoading('Préparation de la fenêtre…');
             document.body.style.overflow = 'hidden';
             showSlot.value = true;
-            if (dialog.value && !dialog.value.open) dialog.value.showModal();
         } else {
             document.body.style.overflow = '';
             closeTimeout = setTimeout(() => {
-                if (dialog.value?.open) dialog.value.close();
                 showSlot.value = false;
             }, 200);
         }
@@ -44,17 +41,11 @@ const closeOnEscape = (event) => {
     }
 };
 
-const onNativeCancel = (event) => {
-    event.preventDefault();
-    close();
-};
-
 onMounted(() => {
     document.addEventListener('keydown', closeOnEscape);
     if (props.show) {
         document.body.style.overflow = 'hidden';
         showSlot.value = true;
-        if (dialog.value && !dialog.value.open) dialog.value.showModal();
     }
 });
 
@@ -71,6 +62,7 @@ const maxWidthClass = computed(() => ({
     xl: 'sm:max-w-xl',
     '2xl': 'sm:max-w-2xl',
     '3xl': 'sm:max-w-3xl',
+    '5xl': 'sm:max-w-5xl',
     '6xl': 'sm:max-w-6xl',
     screen: 'sm:max-w-[calc(100vw-3rem)] xl:max-w-[1500px]',
     full: 'max-w-[1440px]',
@@ -78,13 +70,12 @@ const maxWidthClass = computed(() => ({
 </script>
 
 <template>
-    <dialog
-        ref="dialog"
-        class="z-50 m-0 min-h-full min-w-full overflow-y-auto bg-transparent backdrop:bg-transparent"
-        @cancel="onNativeCancel"
-    >
+    <Teleport to="body">
         <div
-            class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto px-3 py-4 sm:px-6 sm:py-8"
+            v-if="showSlot"
+            class="fixed inset-0 z-[1000] flex items-center justify-center overflow-y-auto px-3 py-4 sm:px-6 sm:py-8"
+            role="dialog"
+            aria-modal="true"
             scroll-region
         >
             <Transition
@@ -126,5 +117,5 @@ const maxWidthClass = computed(() => ({
                 </div>
             </Transition>
         </div>
-    </dialog>
+    </Teleport>
 </template>

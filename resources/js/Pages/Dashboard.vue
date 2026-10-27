@@ -189,7 +189,8 @@ const progressStyle = (progress) => {
 };
 const projectChartColors = ['#2563eb', '#7c3aed', '#06b6d4', '#f59e0b', '#ef4444', '#10b981', '#ec4899', '#4f46e5', '#14b8a6', '#f97316', '#8b5cf6', '#0ea5e9', '#84cc16', '#64748b'];
 const projectChartColor = (index) => projectChartColors[index % projectChartColors.length];
-const projectDurationDays = (project) => Math.max(0, Number(project?.actual_duration_days) || 0);
+const projectDurationDays = (project) => Math.max(0, Number(project?.chart_duration_days) || 0);
+const projectDateSourceLabel = (project) => project?.chart_date_source === 'actual' ? 'Réel' : 'Prévu';
 const durationLabel = (days) => `${days} jour${Number(days) > 1 ? 's' : ''}`;
 const planActualDuration = (plan) => plan.projects.reduce((total, project) => total + projectDurationDays(project), 0);
 const projectChartHasDuration = (plan) => plan.projects.some((project) => projectDurationDays(project) > 0);
@@ -327,8 +328,8 @@ const closeProject = () => { selectedProjectId.value = null; };
                 <section class="overflow-hidden rounded-md border border-[#d5dae3] bg-[#f8f9fb]">
                     <header class="border-b border-[#d5dae3] px-5 py-4 sm:px-6">
                         <p class="text-[10px] font-bold uppercase tracking-[0.14em] text-blue-700">Analyse détaillée</p>
-                        <h2 class="mt-1 text-lg font-semibold text-slate-900">Durée réelle des projets par plan d’action</h2>
-                        <p class="mt-1 text-xs text-slate-500">Comparaison entre la première date de début réel et la dernière date de fin réelle des actions de chaque projet.</p>
+                        <h2 class="mt-1 text-lg font-semibold text-slate-900">Durée des projets par plan d’action</h2>
+                        <p class="mt-1 text-xs text-slate-500">Les dates réelles sont prioritaires lorsqu’elles sont complètes ; sinon, le graphique utilise les dates prévues du projet.</p>
                     </header>
                     <div v-if="actionPlans.some(plan => plan.projects?.length)" class="grid gap-4 p-4 lg:grid-cols-2 sm:p-5">
                         <article v-for="plan in actionPlans.filter(item => item.projects?.length)" :key="plan.id" class="min-w-0 overflow-hidden rounded-md border border-[#dbe2ec] bg-white">
@@ -342,19 +343,20 @@ const closeProject = () => { selectedProjectId.value = null; };
                             <div class="grid gap-3 p-4 xl:grid-cols-[210px_minmax(0,1fr)] xl:items-center">
                                 <div class="relative mx-auto w-full max-w-[230px]">
                                     <VueApexCharts v-if="projectChartHasDuration(plan)" type="donut" height="225" :series="projectChartSeries(plan)" :options="projectChartOptions(plan)" />
-                                    <div v-else class="grid h-[225px] place-items-center rounded-full border border-dashed border-slate-300 bg-slate-50 px-5 text-center text-xs font-semibold text-slate-500">Aucune durée réelle complète</div>
+                                    <div v-else class="grid h-[225px] place-items-center rounded-full border border-dashed border-slate-300 bg-slate-50 px-5 text-center text-xs font-semibold text-slate-500">Aucune durée réelle ou prévue complète</div>
                                 </div>
                                 <div class="min-w-0 space-y-1.5">
                                     <button v-for="(project, index) in plan.projects" :key="project.id ?? index" type="button" class="flex w-full items-center gap-2 rounded-md border px-2.5 py-2 text-left transition hover:bg-blue-50" :class="selectedChartProjectIndex(plan) === index ? 'border-blue-300 bg-blue-50' : 'border-transparent'" @click="selectChartProject(plan, index)">
                                         <span class="h-2.5 w-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: projectChartColor(index) }" />
                                         <span class="min-w-0 flex-1 truncate text-xs font-medium text-slate-700" :title="project.name">{{ project.name }}</span>
-                                        <span class="shrink-0 text-xs font-bold tabular-nums" :class="projectDurationDays(project) ? 'text-slate-900' : 'text-slate-400'">{{ projectDurationDays(project) ? durationLabel(projectDurationDays(project)) : 'Dates incomplètes' }}</span>
+                                        <span v-if="projectDurationDays(project)" class="shrink-0 text-right text-xs font-bold tabular-nums text-slate-900"><span class="block">{{ durationLabel(projectDurationDays(project)) }}</span><span class="block text-[10px] font-semibold" :class="project.chart_date_source === 'actual' ? 'text-emerald-600' : 'text-blue-600'">{{ projectDateSourceLabel(project) }}</span></span>
+                                        <span v-else class="shrink-0 text-xs font-bold text-slate-400">Dates incomplètes</span>
                                     </button>
                                 </div>
                             </div>
                             <div v-if="selectedChartProject(plan)" class="flex flex-wrap items-center justify-between gap-2 border-t border-blue-100 bg-blue-50 px-4 py-3">
                                 <span class="min-w-0 truncate text-xs font-semibold text-blue-900">{{ selectedChartProject(plan).name }}</span>
-                                <span class="text-xs font-bold text-blue-700">{{ formatDate(selectedChartProject(plan).actual_start_date) }} → {{ formatDate(selectedChartProject(plan).actual_end_date) }} · {{ durationLabel(projectDurationDays(selectedChartProject(plan))) }}</span>
+                                <span class="text-xs font-bold text-blue-700">{{ formatDate(selectedChartProject(plan).chart_start_date) }} → {{ formatDate(selectedChartProject(plan).chart_end_date) }} · {{ durationLabel(projectDurationDays(selectedChartProject(plan))) }} ({{ projectDateSourceLabel(selectedChartProject(plan)).toLocaleLowerCase('fr') }})</span>
                                 <button type="button" class="text-xs font-semibold text-blue-700 underline" @click="selectChartProject(plan, selectedChartProjectIndex(plan))">Tout afficher</button>
                             </div>
                         </article>

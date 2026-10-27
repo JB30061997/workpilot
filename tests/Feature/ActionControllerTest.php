@@ -199,6 +199,40 @@ class ActionControllerTest extends TestCase
         ]);
     }
 
+    public function test_starred_department_project_responsible_can_update_action_dates(): void
+    {
+        $director = User::factory()->create();
+        $responsible = User::factory()->create();
+        [$organization, $department] = $this->createContext($director, 'starred-project-responsible');
+        $responsible->organizations()->attach($organization, ['status' => 'active', 'is_active' => true]);
+        $responsible->departments()->attach($department, ['is_active' => true]);
+        $project = $this->createProject($director, $organization, $department, '9 Box Project');
+        $project->departmentResponsibles()->create([
+            'department_id' => $department->id,
+            'user_id' => $responsible->id,
+        ]);
+        $project->members()->attach($responsible, [
+            'role' => 'manager',
+            'joined_at' => now(),
+        ]);
+        $action = $this->createAction($director, $organization, $project, 'Planning 9 Box', 1);
+
+        $response = $this
+            ->actingAs($responsible)
+            ->withSession($this->contextSession($organization, $department))
+            ->patch(route('actions.update', $action), [
+                'start_date' => '2027-01-04',
+                'due_date' => '2027-01-15',
+            ]);
+
+        $response->assertSessionHasNoErrors()->assertRedirect();
+        $this->assertDatabaseHas('actions', [
+            'id' => $action->id,
+            'start_date' => '2027-01-04 00:00:00',
+            'due_date' => '2027-01-15 00:00:00',
+        ]);
+    }
+
     public function test_project_creator_can_update_actions_without_being_the_director_or_manager(): void
     {
         $director = User::factory()->create();

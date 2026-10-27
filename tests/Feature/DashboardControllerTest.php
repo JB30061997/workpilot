@@ -135,9 +135,49 @@ class DashboardControllerTest extends TestCase
             ->where('actionPlans.0.projects.0.actual_start_date', '2026-10-01')
             ->where('actionPlans.0.projects.0.actual_end_date', '2026-10-10')
             ->where('actionPlans.0.projects.0.actual_duration_days', 10)
+            ->where('actionPlans.0.projects.0.chart_start_date', '2026-10-01')
+            ->where('actionPlans.0.projects.0.chart_end_date', '2026-10-10')
+            ->where('actionPlans.0.projects.0.chart_duration_days', 10)
+            ->where('actionPlans.0.projects.0.chart_date_source', 'actual')
             ->where('actionPlans.0.projects.1.id', $secondProject->id)
             ->where('actionPlans.0.projects.1.progress', 65)
             ->where('actionPlans.0.projects.1.actual_duration_days', 0));
+    }
+
+    public function test_action_plan_chart_falls_back_to_project_planned_dates_when_actual_dates_are_incomplete(): void
+    {
+        $user = User::factory()->create();
+        [$organization, $department] = $this->createContext($user);
+        $plan = $this->createActionPlan($user, $organization, $department, 'PAC-SOLUTIONS-PLANNED');
+        $project = $this->createProject($user, $organization, $department, $plan, 'Planned Project', 30);
+        $project->update([
+            'start_date' => '2026-11-01',
+            'due_date' => '2026-11-15',
+        ]);
+        Action::query()->create([
+            'organization_id' => $organization->id,
+            'project_id' => $project->id,
+            'action_plan_id' => $plan->id,
+            'created_by' => $user->id,
+            'title' => 'Action with incomplete actual dates',
+            'actual_start_date' => '2026-11-03',
+            'actual_end_date' => null,
+            'status' => 'in_progress',
+            'priority' => 'medium',
+            'progress' => 30,
+        ]);
+
+        $response = $this
+            ->actingAs($user)
+            ->withSession($this->contextSession($organization, $department))
+            ->get(route('dashboard'));
+
+        $response->assertInertia(fn (Assert $page) => $page
+            ->where('actionPlans.0.projects.0.actual_duration_days', 0)
+            ->where('actionPlans.0.projects.0.chart_start_date', '2026-11-01')
+            ->where('actionPlans.0.projects.0.chart_end_date', '2026-11-15')
+            ->where('actionPlans.0.projects.0.chart_duration_days', 15)
+            ->where('actionPlans.0.projects.0.chart_date_source', 'planned'));
     }
 
     public function test_each_project_portfolio_has_independent_pagination(): void

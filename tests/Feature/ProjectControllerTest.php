@@ -169,6 +169,7 @@ class ProjectControllerTest extends TestCase
             ->from(route('projects.index'))
             ->post(route('projects.store'), [
                 'name' => 'New Project',
+                'code' => 'CLIENT-CODE-MUST-BE-IGNORED',
                 'status' => 'planned',
                 'priority' => 'high',
                 'progress' => 25,
@@ -183,6 +184,7 @@ class ProjectControllerTest extends TestCase
             'department_id' => $department->id,
             'created_by' => $user->id,
             'name' => 'New Project',
+            'code' => 'NEW-PROJECT',
             'status' => 'planned',
             'priority' => 'high',
             'progress' => 0,
@@ -523,6 +525,89 @@ class ProjectControllerTest extends TestCase
             $project->departments()->orderBy('departments.id')->pluck('departments.id')->all(),
         );
         $this->assertSame(1, $project->position);
+    }
+
+    public function test_project_can_be_created_with_one_selected_department(): void
+    {
+        $user = User::factory()->create();
+        [$organization, $department] = $this->createContext($user, 'single-department');
+
+        $response = $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_department_id' => $department->id,
+            ])
+            ->post(route('projects.store'), [
+                'name' => 'Single Department Project',
+                'status' => 'planned',
+                'priority' => 'medium',
+                'department_ids' => [$department->id],
+            ]);
+
+        $response->assertSessionHasNoErrors()->assertRedirect();
+
+        $project = Project::query()->where('name', 'Single Department Project')->firstOrFail();
+        $this->assertSame([$department->id], $project->departments()->pluck('departments.id')->all());
+    }
+
+    public function test_project_creation_saves_selected_members_and_one_responsible_per_department(): void
+    {
+        $user = User::factory()->create();
+        $partnerResponsible = User::factory()->create();
+        [$organization, $department] = $this->createContext($user, 'department-responsibles');
+        $partnerDepartment = Department::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Partner Department',
+        ]);
+        $partnerResponsible->organizations()->attach($organization, [
+            'status' => 'active',
+            'is_active' => true,
+        ]);
+        $partnerResponsible->departments()->attach($partnerDepartment, [
+            'is_active' => true,
+        ]);
+
+        $response = $this->actingAs($user)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_department_id' => $department->id,
+            ])
+            ->post(route('projects.store'), [
+                'name' => 'Project With Department Responsibles',
+                'status' => 'planned',
+                'priority' => 'high',
+                'department_ids' => [$department->id, $partnerDepartment->id],
+                'project_members' => [$user->id, $partnerResponsible->id],
+                'department_responsibles' => [
+                    $department->id => $user->id,
+                    $partnerDepartment->id => $partnerResponsible->id,
+                ],
+            ]);
+
+        $response->assertSessionHasNoErrors()->assertRedirect();
+
+        $project = Project::query()->where('name', 'Project With Department Responsibles')->firstOrFail();
+        $this->assertSame($user->id, $project->manager_id);
+        $this->assertDatabaseHas('project_members', [
+            'project_id' => $project->id,
+            'user_id' => $user->id,
+            'role' => 'manager',
+        ]);
+        $this->assertDatabaseHas('project_members', [
+            'project_id' => $project->id,
+            'user_id' => $partnerResponsible->id,
+            'role' => 'manager',
+        ]);
+        $this->assertDatabaseHas('project_department_responsibles', [
+            'project_id' => $project->id,
+            'department_id' => $department->id,
+            'user_id' => $user->id,
+        ]);
+        $this->assertDatabaseHas('project_department_responsibles', [
+            'project_id' => $project->id,
+            'department_id' => $partnerDepartment->id,
+            'user_id' => $partnerResponsible->id,
+        ]);
     }
 
     public function test_project_rejects_a_department_from_another_organization(): void

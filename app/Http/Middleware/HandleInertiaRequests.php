@@ -2,11 +2,16 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\WorkContextDepartmentService;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 
 class HandleInertiaRequests extends Middleware
 {
+    public function __construct(
+        private readonly WorkContextDepartmentService $departmentAccess,
+    ) {}
+
     /**
      * The root template that is loaded on the first page visit.
      *
@@ -68,12 +73,8 @@ class HandleInertiaRequests extends Middleware
             $organizationId = (int) ($organizations->first()?->id ?? 0);
         }
 
-        $departments = $user->departments()
-            ->where('departments.organization_id', $organizationId)
-            ->wherePivot('is_active', true)
-            ->orderByDesc('department_members.is_primary')
-            ->orderBy('departments.name')
-            ->get(['departments.id', 'departments.name', 'departments.code']);
+        $departments = $this->departmentAccess
+            ->accessibleDepartments($user, $organizationId);
 
         $departmentId = (int) session('current_department_id');
 

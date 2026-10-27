@@ -42,4 +42,11 @@ return [
         'gmail_account' => env('GOOGLE_GMAIL_ACCOUNT'),
     ],
 
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'workflow_model' => env('OPENAI_WORKFLOW_MODEL', 'gpt-4.1-mini'),
+        'workflow_timeout' => env('OPENAI_WORKFLOW_TIMEOUT', 45),
+        'workflow_daily_limit' => env('OPENAI_WORKFLOW_DAILY_LIMIT', 20),
+    ],
+
 ];

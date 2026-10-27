@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Organization;
 use App\Models\OrganizationMember;
 use App\Models\ProjectCategory;
+use App\Services\DefaultRoleProvisioner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -18,6 +19,8 @@ class OrganizationController extends Controller
     private const DEFAULT_PER_PAGE = 20;
 
     private const MAX_PER_PAGE = 100;
+
+    public function __construct(private readonly DefaultRoleProvisioner $defaultRoleProvisioner) {}
 
     /**
      * Find an organization accessible by the authenticated user.
@@ -368,6 +371,14 @@ class OrganizationController extends Controller
                         'is_active' => true,
                     ]);
                 }
+
+                $administratorRole = $this->defaultRoleProvisioner
+                    ->provision($organization)
+                    ->firstWhere('slug', 'administrator');
+
+                $request->user()->roles()->syncWithoutDetaching([
+                    $administratorRole->id => ['organization_id' => $organization->id],
+                ]);
 
                 return $organization;
             }

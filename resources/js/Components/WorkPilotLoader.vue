@@ -1,7 +1,7 @@
 <script setup>
 import { useGlobalLoader } from '@/Composables/useGlobalLoader';
 
-const { isLoading, loaderMessage } = useGlobalLoader();
+const { isLoading, loaderCycle, loaderMessage } = useGlobalLoader();
 </script>
 
 <template>
@@ -9,6 +9,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
         <Transition name="workpilot-loader">
             <div
                 v-if="isLoading"
+                :key="loaderCycle"
                 class="workpilot-loader-overlay"
                 role="status"
                 aria-live="polite"
@@ -37,7 +38,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
                     </div>
 
                     <p class="workpilot-loader-message">{{ loaderMessage }}</p>
-                    <p class="workpilot-loader-tagline">PLAN SMART. WORK BETTER.</p>
+                    <!-- <p class="workpilot-loader-tagline">PLAN SMART. WORK BETTER.</p> -->
                 </div>
             </div>
         </Transition>
@@ -63,7 +64,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
     aspect-ratio: 1;
     border-radius: 9999px;
     background: radial-gradient(circle, rgb(0 174 255 / 0.22), transparent 68%);
-    animation: workpilot-loader-breathe 2.4s ease-in-out infinite;
+    animation: workpilot-loader-breathe 1.4s ease-in-out infinite;
 }
 
 .workpilot-loader-card {
@@ -95,7 +96,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
     position: absolute;
     inset: 0;
     overflow: hidden;
-    animation: workpilot-loader-reveal 2.6s cubic-bezier(.45, 0, .25, 1) infinite;
+    animation: workpilot-loader-reveal 0.85s cubic-bezier(.45, 0, .25, 1) both;
 }
 
 .workpilot-loader-spark {
@@ -107,7 +108,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
     border-radius: 9999px;
     background: #a5f3fc;
     box-shadow: 0 0 8px #22d3ee, 0 0 20px #2563eb;
-    animation: workpilot-loader-spark 2.6s cubic-bezier(.45, 0, .25, 1) infinite;
+    animation: workpilot-loader-spark 0.85s cubic-bezier(.45, 0, .25, 1) both;
 }
 
 .workpilot-loader-track {
@@ -125,7 +126,7 @@ const { isLoading, loaderMessage } = useGlobalLoader();
     border-radius: inherit;
     background: linear-gradient(90deg, #2563eb, #22d3ee, #60a5fa);
     box-shadow: 0 0 14px rgb(34 211 238 / 0.75);
-    animation: workpilot-loader-track 1.25s ease-in-out infinite;
+    animation: workpilot-loader-track 0.85s cubic-bezier(.45, 0, .25, 1) both;
 }
 
 .workpilot-loader-message {
@@ -168,20 +169,20 @@ const { isLoading, loaderMessage } = useGlobalLoader();
 
 @keyframes workpilot-loader-reveal {
     0%, 8% { clip-path: inset(0 100% 0 0); }
-    72%, 90% { clip-path: inset(0 0 0 0); }
-    100% { clip-path: inset(0 0 0 100%); }
+    78%, 100% { clip-path: inset(0 0 0 0); }
 }
 
 @keyframes workpilot-loader-spark {
     0%, 8% { left: 0; opacity: 0; }
     12% { opacity: 1; }
-    72% { left: calc(100% - 0.55rem); opacity: 1; }
-    82%, 100% { left: calc(100% - 0.55rem); opacity: 0; }
+    78% { left: calc(100% - 0.55rem); opacity: 1; }
+    88%, 100% { left: calc(100% - 0.55rem); opacity: 0; }
 }
 
 @keyframes workpilot-loader-track {
-    0% { transform: translateX(-115%); }
-    100% { transform: translateX(340%); }
+    0% { width: 8%; transform: translateX(-110%); }
+    72% { width: 72%; transform: translateX(25%); }
+    100% { width: 100%; transform: translateX(0); }
 }
 
 @keyframes workpilot-loader-breathe {

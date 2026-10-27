@@ -51,6 +51,23 @@ class ProjectChatAttachmentPreviewTest extends TestCase
             ->assertHeader('Content-Disposition', 'attachment; filename=preview.pdf');
     }
 
+    public function test_project_member_can_load_an_image_as_a_data_url(): void
+    {
+        Storage::fake('local');
+        [$user, $attachment] = $this->createAttachment('image/png');
+
+        Storage::disk('local')->put($attachment->path, 'image-content');
+
+        $this
+            ->actingAs($user)
+            ->getJson(route('project-chat.download', $attachment).'?preview=1&data_url=1')
+            ->assertOk()
+            ->assertJsonPath(
+                'data_url',
+                'data:image/png;base64,'.base64_encode('image-content')
+            );
+    }
+
     /**
      * @return array{User, ProjectChatAttachment}
      */

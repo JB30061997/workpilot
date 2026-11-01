@@ -16,6 +16,8 @@ return [
 
     'default' => env('MAIL_MAILER', 'log'),
 
+    'professional_domain' => env('WORKPILOT_MAIL_DOMAIN', 'holged.com'),
+
     /*
     |--------------------------------------------------------------------------
     | Mailer Configurations

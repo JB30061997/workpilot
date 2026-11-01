@@ -3,6 +3,7 @@
 namespace App\Services\AI;
 
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class WorkflowGraphValidator
@@ -153,12 +154,26 @@ class WorkflowGraphValidator
                 'data' => [
                     'description' => mb_substr((string) ($node['description'] ?? ''), 0, 1000),
                     'owner' => mb_substr((string) ($node['owner'] ?? ''), 0, 150),
+                    'owner_type' => $this->ownerType($node),
                     'duration' => is_int($node['duration'] ?? null) ? $node['duration'] : null,
                     'color' => $node['color'] ?? 'sky',
                     'aiGenerated' => true,
                 ],
             ];
         })->values()->all();
+    }
+
+    /** @param array<string, mixed> $node */
+    private function ownerType(array $node): string
+    {
+        if (in_array($node['owner_type'] ?? null, ['human', 'system'], true)) {
+            return $node['owner_type'];
+        }
+
+        $owner = Str::lower(Str::ascii((string) ($node['owner'] ?? '')));
+        $isSystem = preg_match('/\b(systeme?|robot|automati[a-z]*|application|plateforme|logiciel|api)\b/', $owner) === 1;
+
+        return $isSystem ? 'system' : 'human';
     }
 
     private function fail(string $message): never

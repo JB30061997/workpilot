@@ -6,6 +6,8 @@ use App\Models\Project;
 use App\Models\ProjectChatAttachment;
 use App\Models\ProjectChatMessage;
 use App\Models\ProjectChatRead;
+use App\Notifications\ProjectChatMessageNotification;
+use App\Support\ProjectChatAccessAuthorizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -16,15 +18,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class ProjectChatController extends Controller
 {
-    /**
-     * Liste des projets accessibles à l'utilisateur.
-     */
-    private function accessibleProjectIds(Request $request)
-    {
-        return DB::table('project_members')
-            ->where('user_id', $request->user()->id)
-            ->select('project_id');
-    }
+    public function __construct(
+        private readonly ProjectChatAccessAuthorizer $chatAccessAuthorizer,
+    ) {}
 
     /**
      * Vérifier que l'utilisateur appartient au projet.
@@ -33,16 +29,7 @@ class ProjectChatController extends Controller
         Request $request,
         Project $project
     ): void {
-        $allowed = DB::table('project_members')
-            ->where('project_id', $project->id)
-            ->where('user_id', $request->user()->id)
-            ->exists();
-
-        abort_unless(
-            $allowed,
-            403,
-            'Vous ne faites pas partie de ce projet.'
-        );
+        $this->chatAccessAuthorizer->authorize($request->user(), $project);
     }
 
     /**
@@ -50,8 +37,8 @@ class ProjectChatController extends Controller
      */
     private function accessibleProjectsWithStats(Request $request)
     {
-        $projects = Project::query()
-            ->whereIn('id', $this->accessibleProjectIds($request))
+        $projects = $this->chatAccessAuthorizer
+            ->accessibleProjects($request->user())
             ->get(['id', 'name', 'code', 'status', 'created_at']);
 
         return $this->addChatStats($projects, (int) $request->user()->id);
@@ -73,11 +60,8 @@ class ProjectChatController extends Controller
      */
     public function groups(Request $request)
     {
-        $projects = Project::query()
-            ->whereIn(
-                'id',
-                $this->accessibleProjectIds($request)
-            )
+        $projects = $this->chatAccessAuthorizer
+            ->accessibleProjects($request->user())
             ->get([
                 'id',
                 'name',
@@ -296,11 +280,16 @@ class ProjectChatController extends Controller
             throw $e;
         }
 
+        $message->load(['project:id,name,code', 'user:id,name', 'attachments']);
+        $this->chatAccessAuthorizer
+            ->recipients($project)
+            ->where('id', '<>', $request->user()->id)
+            ->each(fn ($recipient) => $recipient->notify(
+                (new ProjectChatMessageNotification($message))->afterCommit()
+            ));
+
         return response()->json(
-            $message->load([
-                'user:id,name',
-                'attachments',
-            ]),
+            $message,
             201
         );
     }

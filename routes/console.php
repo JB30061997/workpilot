@@ -13,3 +13,15 @@ Schedule::command('action-plans:rollover')
     ->timezone('Africa/Casablanca')
     ->withoutOverlapping()
     ->onOneServer();
+
+Schedule::command('workpilot:send-deadline-reminders')
+    ->hourly()
+    ->timezone('Africa/Casablanca')
+    ->withoutOverlapping(30)
+    ->onOneServer();
+
+Schedule::command('workpilot:send-daily-summaries')
+    ->dailyAt('08:00')
+    ->timezone('Africa/Casablanca')
+    ->withoutOverlapping(30)
+    ->onOneServer();

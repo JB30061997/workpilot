@@ -60,7 +60,7 @@ class WorkflowController extends Controller
         $sort = $filters['sort'] ?? 'updated_at';
         $direction = $filters['direction'] ?? 'desc';
         $workflows = (clone $scope)
-            ->with(['project:id,name,code,manager_id', 'creator:id,name'])
+            ->with(['project:id,name,code,manager_id,organization_id,department_id,created_by', 'creator:id,name'])
             ->withCount(['nodes', 'edges'])
             ->when($filters['search'] ?? null, function ($query, string $search): void {
                 $query->where(function ($searchQuery) use ($search): void {
@@ -76,6 +76,11 @@ class WorkflowController extends Controller
             ->when($sort !== 'project', fn ($query) => $query->orderBy($sort, $direction))
             ->paginate($filters['per_page'] ?? 15)
             ->withQueryString();
+
+        $workflows->getCollection()->each(function (WorkflowDefinition $workflow) use ($request): void {
+            $workflow->setAttribute('can_access', $this->canAccessProject($request, $workflow->project));
+            $workflow->setAttribute('can_manage', $this->canManage($request, $workflow->project));
+        });
 
         $projects = Project::query()
             ->where('organization_id', $organizationId)
@@ -128,9 +133,15 @@ class WorkflowController extends Controller
         return redirect()->route('workflows.edit', [$project, $workflow]);
     }
 
-    public function edit(Request $request, Project $project, WorkflowDefinition $workflow): Response
+    public function edit(Request $request, Project $project, WorkflowDefinition $workflow): Response|RedirectResponse
     {
-        $this->authorizeWorkflow($request, $project, $workflow);
+        abort_unless((int) $workflow->project_id === (int) $project->id && (int) $workflow->organization_id === (int) $project->organization_id, 404);
+
+        if (! $this->canAccessProject($request, $project)) {
+            return redirect()
+                ->route('workflows.library')
+                ->with('error', 'Accès restreint : vous pouvez voir ce processus dans la bibliothèque, mais vous n’êtes pas autorisé à l’ouvrir.');
+        }
 
         return Inertia::render('Workflows/Builder', [
             'project' => $project->only('id', 'name', 'code'),
@@ -255,13 +266,36 @@ class WorkflowController extends Controller
 
             return;
         }
-        abort_unless(
-            $this->departmentAccess->isDirectorGeneral($user, $organizationId)
-                || $this->canManage($request, $project)
-                || $project->members()->whereKey($user->id)->exists()
-                || (int) $project->created_by === (int) $user->id,
-            403,
-        );
+
+        abort_unless($this->canAccessProject($request, $project), 403);
+    }
+
+    private function canAccessProject(Request $request, Project $project): bool
+    {
+        $organizationId = (int) session('current_organization_id');
+        $departmentId = (int) session('current_department_id');
+        $user = $request->user();
+
+        if (! $organizationId || ! $departmentId || (int) $project->organization_id !== $organizationId) {
+            return false;
+        }
+
+        if (! $user->organizations()->whereKey($organizationId)->wherePivot('is_active', true)->exists()) {
+            return false;
+        }
+
+        if (! $this->departmentAccess->canAccessDepartment($user, $organizationId, $departmentId)) {
+            return false;
+        }
+
+        if ((int) $project->department_id !== $departmentId && ! $project->departments()->whereKey($departmentId)->exists()) {
+            return false;
+        }
+
+        return $this->departmentAccess->isDirectorGeneral($user, $organizationId)
+            || $this->canManage($request, $project)
+            || $project->members()->whereKey($user->id)->exists()
+            || (int) $project->created_by === (int) $user->id;
     }
 
     private function canManage(Request $request, Project $project): bool

@@ -159,6 +159,50 @@ class WorkflowControllerTest extends TestCase
                 ->where('canManage', false));
     }
 
+    public function test_department_user_without_project_access_sees_a_restricted_action_instead_of_a_forbidden_page(): void
+    {
+        [$manager, $project, $session] = $this->projectContext();
+        $workflow = WorkflowDefinition::query()->create([
+            'organization_id' => $project->organization_id,
+            'project_id' => $project->id,
+            'created_by' => $manager->id,
+            'name' => 'Processus réservé au projet',
+            'status' => 'draft',
+        ]);
+        $departmentUser = User::factory()->create();
+        $departmentUser->organizations()->attach($project->organization_id, ['status' => 'active', 'is_active' => true]);
+        $departmentUser->departments()->attach($project->department_id, ['is_primary' => true, 'is_active' => true]);
+
+        $this->actingAs($departmentUser)
+            ->withSession($session)
+            ->get(route('workflows.library'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('workflows.data', 1)
+                ->where('workflows.data.0.id', $workflow->id)
+                ->where('workflows.data.0.can_access', false)
+                ->where('workflows.data.0.can_manage', false));
+
+        $this->actingAs($departmentUser)
+            ->withSession($session)
+            ->get(route('workflows.edit', [$project, $workflow]))
+            ->assertRedirect(route('workflows.library'))
+            ->assertSessionHas('error', 'Accès restreint : vous pouvez voir ce processus dans la bibliothèque, mais vous n’êtes pas autorisé à l’ouvrir.');
+
+        $this->actingAs($departmentUser)
+            ->withSession($session)
+            ->put(route('workflows.update', [$project, $workflow]), [
+                'name' => $workflow->name,
+                'nodes' => [
+                    ['id' => 'start', 'type' => 'start', 'label' => 'Début', 'position' => ['x' => 0, 'y' => 0], 'data' => []],
+                    ['id' => 'end', 'type' => 'end', 'label' => 'Fin', 'position' => ['x' => 300, 'y' => 0], 'data' => []],
+                ],
+                'edges' => [
+                    ['id' => 'edge-1', 'source' => 'start', 'target' => 'end'],
+                ],
+            ])
+            ->assertForbidden();
+    }
+
     /** @return array{User, Project, array<string, int>} */
     private function projectContext(): array
     {

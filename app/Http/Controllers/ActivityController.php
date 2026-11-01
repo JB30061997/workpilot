@@ -7,6 +7,9 @@ use App\Models\Organization;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class ActivityController extends Controller
 {
@@ -67,14 +70,15 @@ class ActivityController extends Controller
         return Activity::query()
             ->whereKey($activityId)
             ->where('organization_id', $organization->id)
+            ->where('user_id', $request->user()->id)
             ->firstOrFail();
     }
 
     /**
      * Display the audit/activity history
-     * of the current organization.
+     * of the authenticated user in the current organization.
      */
-    public function index(Request $request): JsonResponse
+    public function index(Request $request): JsonResponse|Response
     {
         $organization = $this->getCurrentOrganization($request);
 
@@ -83,12 +87,6 @@ class ActivityController extends Controller
                 'nullable',
                 'string',
                 'max:100',
-            ],
-
-            'user_id' => [
-                'nullable',
-                'integer',
-                'exists:users,id',
             ],
 
             'subject_type' => [
@@ -141,13 +139,7 @@ class ActivityController extends Controller
                 'organization_id',
                 $organization->id
             )
-
-            /*
-             * User who generated the event.
-             */
-            ->with([
-                'user:id,name,email',
-            ])
+            ->where('user_id', $request->user()->id)
 
             /*
              * Filter by event type:
@@ -158,17 +150,6 @@ class ActivityController extends Controller
                 fn (Builder $query) => $query->where(
                     'event',
                     $validated['event']
-                )
-            )
-
-            /*
-             * Filter by actor.
-             */
-            ->when(
-                ! empty($validated['user_id']),
-                fn (Builder $query) => $query->where(
-                    'user_id',
-                    $validated['user_id']
                 )
             )
 
@@ -248,26 +229,64 @@ class ActivityController extends Controller
             ->latest('id')
 
             ->paginate($perPage)
-            ->withQueryString();
+            ->withQueryString()
+            ->through(fn (Activity $activity): array => [
+                'id' => $activity->id,
+                'event' => $activity->event,
+                'description' => $activity->description,
+                'subject_type' => $activity->subject_type,
+                'subject_id' => $activity->subject_id,
+                'subject_label' => $activity->metadata['subject_label'] ?? Str::headline(class_basename((string) $activity->subject_type)),
+                'record_label' => $activity->metadata['record_label'] ?? null,
+                'old_values' => $activity->old_values,
+                'new_values' => $activity->new_values,
+                'metadata' => $activity->metadata,
+                'ip_address' => $activity->ip_address,
+                'user_agent' => $activity->user_agent,
+                'created_at' => $activity->created_at,
+            ]);
 
-        return response()->json([
+        $baseQuery = Activity::query()
+            ->where('organization_id', $organization->id)
+            ->where('user_id', $request->user()->id);
+
+        $payload = [
             'organization' => [
                 'id' => $organization->id,
                 'name' => $organization->name,
             ],
-
+            'activities' => $activities,
             'filters' => [
                 'event' => $validated['event'] ?? null,
-                'user_id' => $validated['user_id'] ?? null,
                 'subject_type' => $validated['subject_type'] ?? null,
-                'subject_id' => $validated['subject_id'] ?? null,
                 'search' => $validated['search'] ?? null,
                 'date_from' => $validated['date_from'] ?? null,
                 'date_to' => $validated['date_to'] ?? null,
             ],
+            'summary' => [
+                'total' => (clone $baseQuery)->count(),
+                'created' => (clone $baseQuery)->where('event', 'created')->count(),
+                'updated' => (clone $baseQuery)->where('event', 'updated')->count(),
+                'deleted' => (clone $baseQuery)->where('event', 'deleted')->count(),
+            ],
+            'subjectTypes' => (clone $baseQuery)
+                ->whereNotNull('subject_type')
+                ->select('subject_type')
+                ->distinct()
+                ->orderBy('subject_type')
+                ->pluck('subject_type')
+                ->map(fn (string $type): array => [
+                    'value' => $type,
+                    'label' => Str::headline(class_basename($type)),
+                ])
+                ->values(),
+        ];
 
-            'activities' => $activities,
-        ]);
+        if ($request->wantsJson()) {
+            return response()->json($payload);
+        }
+
+        return Inertia::render('Activities/Index', $payload);
     }
 
     /**

@@ -7,10 +7,6 @@ use App\Models\User;
 
 class ProjectAccessAuthorizer
 {
-    public function __construct(
-        private readonly CurrentDepartmentAuthorizer $departmentAuthorizer
-    ) {}
-
     public function canCreateProject(User $user, int $organizationId, int $departmentId): bool
     {
         $belongsToOrganization = $user->organizations()
@@ -51,11 +47,7 @@ class ProjectAccessAuthorizer
                 ->where('user_id', $user->id)
                 ->where('role', 'manager')
                 ->exists()
-            || $this->departmentAuthorizer->canManageAccess(
-                $user,
-                $organizationId,
-                $departmentId,
-            );
+            || $this->isDepartmentDirector($user, $organizationId, $departmentId);
     }
 
     public function canManageProjectActions(
@@ -93,7 +85,7 @@ class ProjectAccessAuthorizer
         abort_unless(
             $this->canManageProject($user, $project, $organizationId, $departmentId),
             403,
-            'Seuls le directeur du département et le responsable du projet peuvent effectuer cette action.'
+            'Seuls le directeur du département et les responsables du projet peuvent effectuer cette action.'
         );
     }
 
@@ -114,5 +106,25 @@ class ProjectAccessAuthorizer
     {
         return (int) $project->department_id === $departmentId
             || $project->departments()->whereKey($departmentId)->exists();
+    }
+
+    private function isDepartmentDirector(User $user, int $organizationId, int $departmentId): bool
+    {
+        $directsDepartment = $user->departmentMemberships()
+            ->where('department_id', $departmentId)
+            ->where('is_manager', true)
+            ->where('is_active', true)
+            ->whereHas('department', fn ($query) => $query->where('organization_id', $organizationId))
+            ->exists();
+
+        if (! $directsDepartment) {
+            return false;
+        }
+
+        return $user->roles()
+            ->where('user_roles.organization_id', $organizationId)
+            ->where('roles.slug', 'department-manager')
+            ->where('roles.is_active', true)
+            ->exists();
     }
 }

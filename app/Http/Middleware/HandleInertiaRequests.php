@@ -42,6 +42,22 @@ class HandleInertiaRequests extends Middleware
                 'user' => $user,
             ],
             'workContext' => fn (): ?array => $user ? $this->workContext($request) : null,
+            'notifications' => fn (): array => $user
+                ? $user->notifications()
+                    ->latest()
+                    ->limit(15)
+                    ->get()
+                    ->map(fn ($notification): array => [
+                        'id' => $notification->id,
+                        'title' => $notification->data['title'] ?? 'Notification',
+                        'message' => $notification->data['message'] ?? '',
+                        'icon' => $notification->data['icon'] ?? 'info',
+                        'url' => $notification->data['url'] ?? null,
+                        'read_at' => $notification->read_at?->toIso8601String(),
+                        'time' => $notification->created_at->diffForHumans(),
+                    ])
+                    ->all()
+                : [],
             'flash' => [
                 'success' => fn (): ?string => $request->session()->get('success'),
                 'error' => fn (): ?string => $request->session()->get('error'),

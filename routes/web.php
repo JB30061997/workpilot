@@ -5,6 +5,7 @@ use App\Http\Controllers\AccessControlController;
 use App\Http\Controllers\ActionCommentController;
 use App\Http\Controllers\ActionController;
 use App\Http\Controllers\ActionPlanController;
+use App\Http\Controllers\ActionPlanImportController;
 use App\Http\Controllers\ActivityController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\AxisController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\DepartmentMemberController;
 use App\Http\Controllers\GlpiController;
 use App\Http\Controllers\GmailIntegrationController;
+use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OrganizationMemberController;
 use App\Http\Controllers\PermissionController;
@@ -73,6 +75,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('/dashboard', [DashboardController::class, 'index'])
         ->name('dashboard');
+
+    Route::patch('/notifications/{notification}/read', [NotificationController::class, 'read'])
+        ->name('notifications.read');
+
+    Route::patch('/notifications/read-all', [NotificationController::class, 'readAll'])
+        ->name('notifications.read-all');
 
     Route::get('/workflows', [WorkflowController::class, 'library'])
         ->name('workflows.library');
@@ -298,6 +306,9 @@ Route::middleware(['auth', 'verified'])->group(function () {
     | API Resources
     |--------------------------------------------------------------------------
     */
+
+    Route::post('/action-plans/import', [ActionPlanImportController::class, 'store'])
+        ->name('action-plans.import');
 
     Route::apiResources([
         'action-plans' => ActionPlanController::class,

@@ -1,8 +1,66 @@
-<script setup>
-import GuestLayout from '@/Layouts/GuestLayout.vue';
-import { Head, Link, useForm } from '@inertiajs/vue3';
-defineProps({ status: { type: String, default: null } });
-const form = useForm({ email: '' });
-const submit = () => form.post(route('password.email'));
+<script setup lang="ts">
+import { Form, Head } from '@inertiajs/vue3';
+import InputError from '@/components/InputError.vue';
+import TextLink from '@/components/TextLink.vue';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { login } from '@/routes';
+import { email } from '@/routes/password';
+
+defineOptions({
+    layout: {
+        title: 'Forgot password',
+        description: 'Enter your email to receive a password reset link',
+    },
+});
+
+defineProps<{
+    status?: string;
+}>();
 </script>
-<template><GuestLayout><Head title="Mot de passe oublié | WorkPilot" /><div class="auth-stagger"><p class="text-sm font-bold text-blue-600">Récupération</p><h1 class="mt-3 text-3xl font-bold tracking-[-0.045em]">Mot de passe oublié ?</h1><p class="mt-2 text-sm leading-6 text-slate-500">Recevez un lien sécurisé par e-mail.</p></div><div v-if="status" class="auth-stagger mt-5 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{{ status }}</div><form class="mt-7 grid gap-5" @submit.prevent="submit"><div class="auth-stagger"><label for="email" class="mb-2 block text-xs font-bold text-slate-700">Adresse e-mail</label><input id="email" v-model="form.email" type="email" required autofocus autocomplete="username" class="auth-input" /><Transition name="field-error"><p v-if="form.errors.email" class="mt-2 text-xs font-semibold text-rose-600">{{ form.errors.email }}</p></Transition></div><button type="submit" :disabled="form.processing" class="auth-primary auth-stagger"><span>{{ form.processing ? 'Envoi...' : 'Envoyer le lien' }}</span><span>→</span></button><Link :href="route('login')" class="auth-stagger text-center text-sm font-semibold text-slate-500 hover:text-blue-600">Retour à la connexion</Link></form></GuestLayout></template>
+
+<template>
+    <Head title="Forgot password" />
+
+    <div
+        v-if="status"
+        class="mb-4 text-center text-sm font-medium text-green-600"
+    >
+        {{ status }}
+    </div>
+
+    <div class="space-y-6">
+        <Form v-bind="email.form()" v-slot="{ errors, processing }">
+            <div class="grid gap-2">
+                <Label for="email">Email address</Label>
+                <Input
+                    id="email"
+                    type="email"
+                    name="email"
+                    autocomplete="off"
+                    v-focus
+                    placeholder="email@example.com"
+                />
+                <InputError :message="errors.email" />
+            </div>
+
+            <div class="my-6 flex items-center justify-start">
+                <Button
+                    class="w-full"
+                    :disabled="processing"
+                    data-test="email-password-reset-link-button"
+                >
+                    <Spinner v-if="processing" />
+                    Email password reset link
+                </Button>
+            </div>
+        </Form>
+
+        <div class="space-x-1 text-center text-sm text-muted-foreground">
+            <span>Or, return to</span>
+            <TextLink :href="login()">log in</TextLink>
+        </div>
+    </div>
+</template>

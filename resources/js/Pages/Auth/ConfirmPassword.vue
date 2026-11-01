@@ -1,7 +1,69 @@
-<script setup>
-import GuestLayout from '@/Layouts/GuestLayout.vue';
-import { Head, useForm } from '@inertiajs/vue3';
-const form = useForm({ password: '' });
-const submit = () => form.post(route('password.confirm'), { onFinish: () => form.reset() });
+<script setup lang="ts">
+import { Form, Head } from '@inertiajs/vue3';
+import InputError from '@/components/InputError.vue';
+import PasswordInput from '@/components/PasswordInput.vue';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { store } from '@/routes/password/confirm';
+import {
+    index as confirmOptions,
+    store as confirmStore,
+} from '@/actions/Laravel/Passkeys/Http/Controllers/PasskeyConfirmationController';
+import PasskeyVerify from '@/components/PasskeyVerify.vue';
+
+defineOptions({
+    layout: {
+        title: 'Confirm password',
+        description:
+            'This is a secure area of the application. Please confirm your password before continuing.',
+    },
+});
 </script>
-<template><GuestLayout><Head title="Confirmer l’accès | WorkPilot" /><div class="auth-stagger"><span class="grid h-11 w-11 place-items-center rounded-xl bg-blue-50 text-blue-600"><svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg></span><h1 class="mt-5 text-3xl font-bold tracking-[-0.045em]">Confirmez votre accès.</h1><p class="mt-2 text-sm leading-6 text-slate-500">Cette zone nécessite votre mot de passe.</p></div><form class="mt-7 grid gap-5" @submit.prevent="submit"><div class="auth-stagger"><label for="password" class="mb-2 block text-xs font-bold text-slate-700">Mot de passe</label><input id="password" v-model="form.password" type="password" required autofocus autocomplete="current-password" class="auth-input" /><Transition name="field-error"><p v-if="form.errors.password" class="mt-2 text-xs font-semibold text-rose-600">{{ form.errors.password }}</p></Transition></div><button type="submit" :disabled="form.processing" class="auth-primary auth-stagger"><span>{{ form.processing ? 'Vérification...' : 'Continuer' }}</span><span>→</span></button></form></GuestLayout></template>
+
+<template>
+    <Head title="Confirm password" />
+
+    <PasskeyVerify
+        :routes="{
+            options: confirmOptions(),
+            submit: confirmStore(),
+        }"
+        label="Confirm with passkey"
+        loading-label="Confirming..."
+        separator="Or confirm with password"
+    />
+
+    <Form
+        v-bind="store.form()"
+        reset-on-success
+        v-slot="{ errors, processing }"
+    >
+        <div class="space-y-6">
+            <div class="grid gap-2">
+                <Label htmlFor="password">Password</Label>
+                <PasswordInput
+                    id="password"
+                    name="password"
+                    class="mt-1 block w-full"
+                    required
+                    autocomplete="current-password"
+                    autofocus
+                />
+
+                <InputError :message="errors.password" />
+            </div>
+
+            <div class="flex items-center">
+                <Button
+                    class="w-full"
+                    :disabled="processing"
+                    data-test="confirm-password-button"
+                >
+                    <Spinner v-if="processing" />
+                    Confirm password
+                </Button>
+            </div>
+        </div>
+    </Form>
+</template>

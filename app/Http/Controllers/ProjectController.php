@@ -13,6 +13,7 @@ use App\Services\ProjectWorkflowService;
 use App\Services\UniqueCodeGenerator;
 use App\Services\WorkContextDepartmentService;
 use App\Support\ProjectAccessAuthorizer;
+use App\Support\ProjectChatAccessAuthorizer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -46,6 +47,7 @@ class ProjectController extends Controller
 
     public function __construct(
         private readonly ProjectAccessAuthorizer $projectAuthorizer,
+        private readonly ProjectChatAccessAuthorizer $chatAccessAuthorizer,
         private readonly ProjectWorkflowService $workflowService,
         private readonly UniqueCodeGenerator $codeGenerator,
         private readonly WorkContextDepartmentService $departmentAccess,
@@ -432,14 +434,22 @@ class ProjectController extends Controller
 
     private function appendProjectMembershipPayload(Project $project): Project
     {
+        $primaryResponsible = $project->departmentResponsibles
+            ->firstWhere('department_id', $project->department_id)
+            ?? $project->departmentResponsibles->first();
+
         $project->setAttribute('project_members', $project->members->map(fn (User $user): array => [
             'user_id' => $user->id,
             'user' => $user->only(['id', 'name', 'email']),
             'role' => $user->pivot->role,
         ])->values());
         $project->setAttribute(
-            'department_responsibles',
+            'department_responsible_ids',
             $project->departmentResponsibles->pluck('user_id', 'department_id')->all()
+        );
+        $project->setAttribute(
+            'responsible',
+            $primaryResponsible?->user?->only(['id', 'name', 'email'])
         );
 
         return $project;
@@ -712,6 +722,7 @@ class ProjectController extends Controller
                 'departments:id,name,code',
                 'members:id,name,email',
                 'departmentResponsibles:id,project_id,department_id,user_id',
+                'departmentResponsibles.user:id,name,email',
             ])
 
             ->withCount([
@@ -768,6 +779,10 @@ class ProjectController extends Controller
                 $project,
                 $context['organization']->id,
                 $context['department']->id,
+            ));
+            $project->setAttribute('can_access_chat', $this->chatAccessAuthorizer->canAccess(
+                $request->user(),
+                $project,
             ));
 
             return $this->appendProjectMembershipPayload($project);
@@ -886,6 +901,10 @@ class ProjectController extends Controller
                         $project,
                         $context['organization']->id,
                         $context['department']->id,
+                    ));
+                    $project->setAttribute('can_access_chat', $this->chatAccessAuthorizer->canAccess(
+                        $request->user(),
+                        $project,
                     ));
 
                     return $project;
@@ -1517,6 +1536,12 @@ class ProjectController extends Controller
                 $finalDepartmentIds,
                 $context['organization'],
             );
+
+            $primaryDepartmentId = $project->department_id !== null
+                ? (int) $project->department_id
+                : (int) ($finalDepartmentIds[0] ?? 0);
+            $data['manager_id'] = $memberships['department_responsibles'][$primaryDepartmentId]
+                ?? collect($memberships['department_responsibles'])->first();
         }
 
         unset($data['department_ids']);

@@ -211,6 +211,7 @@ class ProjectControllerTest extends TestCase
         $user = User::factory()->create();
         [$organization, $department] = $this->createContext($user, 'duplicate-project');
         $project = $this->createProject($user, $organization, $department, 'Original Project');
+        $project->update(['manager_id' => $user->id]);
         Action::query()->create([
             'organization_id' => $organization->id,
             'project_id' => $project->id,
@@ -327,6 +328,7 @@ class ProjectControllerTest extends TestCase
             'is_active' => true,
         ]);
         $project = $this->createProject($user, $organization, $department, 'Project before update');
+        $project->update(['manager_id' => $user->id]);
 
         $response = $this
             ->actingAs($user)
@@ -392,6 +394,157 @@ class ProjectControllerTest extends TestCase
         $this->assertDatabaseHas('projects', [
             'id' => $project->id,
             'name' => 'Manager Updated Project',
+        ]);
+    }
+
+    public function test_project_update_persists_and_displays_the_department_responsible(): void
+    {
+        $currentManager = User::factory()->create();
+        $newResponsible = User::factory()->create();
+        [$organization, $department] = $this->createContext($currentManager, 'update-responsible');
+        $newResponsible->organizations()->attach($organization, ['status' => 'active', 'is_active' => true]);
+        $newResponsible->departments()->attach($department, ['is_active' => true]);
+        $project = $this->createProject($currentManager, $organization, $department, 'Responsible Project');
+        $project->update(['manager_id' => $currentManager->id]);
+        $session = [
+            'current_organization_id' => $organization->id,
+            'current_department_id' => $department->id,
+        ];
+
+        $this->actingAs($currentManager)
+            ->withSession($session)
+            ->patch(route('projects.update', $project), [
+                'department_ids' => [$department->id],
+                'project_members' => [$currentManager->id, $newResponsible->id],
+                'department_responsibles' => [
+                    $department->id => $newResponsible->id,
+                ],
+            ])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect();
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'manager_id' => $newResponsible->id,
+        ]);
+        $this->assertDatabaseHas('project_department_responsibles', [
+            'project_id' => $project->id,
+            'department_id' => $department->id,
+            'user_id' => $newResponsible->id,
+        ]);
+
+        $this->actingAs($newResponsible)
+            ->withSession($session)
+            ->get(route('projects.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('projects.data.0.id', $project->id)
+                ->where('projects.data.0.manager.id', $newResponsible->id)
+                ->where('projects.data.0.manager.name', $newResponsible->name)
+                ->where("projects.data.0.department_responsible_ids.{$department->id}", $newResponsible->id));
+    }
+
+    public function test_projects_table_displays_a_saved_department_responsible_when_manager_id_is_null(): void
+    {
+        $director = User::factory()->create();
+        $responsible = User::factory()->create();
+        [$organization, $department] = $this->createContext($director, 'legacy-responsible-display');
+        $responsible->organizations()->attach($organization, ['status' => 'active', 'is_active' => true]);
+        $responsible->departments()->attach($department, ['is_active' => true]);
+        $project = $this->createProject($director, $organization, $department, 'Legacy Responsible Project');
+        $project->departmentResponsibles()->create([
+            'department_id' => $department->id,
+            'user_id' => $responsible->id,
+        ]);
+
+        $this->actingAs($director)
+            ->withSession([
+                'current_organization_id' => $organization->id,
+                'current_department_id' => $department->id,
+            ])
+            ->get(route('projects.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('projects.data.0.id', $project->id)
+                ->where('projects.data.0.manager', null)
+                ->where('projects.data.0.responsible.id', $responsible->id)
+                ->where('projects.data.0.responsible.name', $responsible->name));
+    }
+
+    public function test_director_general_cannot_manage_an_unassigned_project(): void
+    {
+        $director = User::factory()->create();
+        [$organization, $department] = $this->createContext($director, 'director-unassigned-project');
+        $project = $this->createProject($director, $organization, $department, 'Unassigned Project');
+        $session = [
+            'current_organization_id' => $organization->id,
+            'current_department_id' => $department->id,
+        ];
+
+        $this->actingAs($director)
+            ->withSession($session)
+            ->get(route('projects.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('projects.data.0.id', $project->id)
+                ->where('projects.data.0.can_manage', false));
+
+        $this->actingAs($director)
+            ->withSession($session)
+            ->patch(route('projects.update', $project), ['name' => 'Forbidden Update'])
+            ->assertForbidden();
+        $this->actingAs($director)
+            ->withSession($session)
+            ->post(route('projects.duplicate', $project))
+            ->assertForbidden();
+        $this->actingAs($director)
+            ->withSession($session)
+            ->delete(route('projects.destroy', $project))
+            ->assertForbidden();
+
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'name' => 'Unassigned Project',
+        ]);
+        $this->assertDatabaseMissing('projects', ['name' => 'Unassigned Project (Copie)']);
+    }
+
+    public function test_department_director_can_manage_projects_in_their_department(): void
+    {
+        $directorGeneral = User::factory()->create();
+        $departmentDirector = User::factory()->create();
+        [$organization, $department] = $this->createContext($directorGeneral, 'department-director-project');
+        $departmentDirector->organizations()->attach($organization, ['status' => 'active', 'is_active' => true]);
+        $departmentDirector->departments()->attach($department, [
+            'is_manager' => true,
+            'is_active' => true,
+        ]);
+        $departmentDirectorRole = Role::query()->create([
+            'organization_id' => $organization->id,
+            'name' => 'Directeur de département',
+            'slug' => 'department-manager',
+            'is_active' => true,
+        ]);
+        $departmentDirector->roles()->attach($departmentDirectorRole, ['organization_id' => $organization->id]);
+        $project = $this->createProject($directorGeneral, $organization, $department, 'Department Project');
+        $session = [
+            'current_organization_id' => $organization->id,
+            'current_department_id' => $department->id,
+        ];
+
+        $this->actingAs($departmentDirector)
+            ->withSession($session)
+            ->get(route('projects.index'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('projects.data.0.id', $project->id)
+                ->where('projects.data.0.can_manage', true)
+                ->where('projects.data.0.can_access_chat', true));
+
+        $this->actingAs($departmentDirector)
+            ->withSession($session)
+            ->patch(route('projects.update', $project), ['name' => 'Department Director Updated Project'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect();
+        $this->assertDatabaseHas('projects', [
+            'id' => $project->id,
+            'name' => 'Department Director Updated Project',
         ]);
     }
 

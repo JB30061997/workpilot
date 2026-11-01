@@ -30,6 +30,8 @@ class WorkflowAIGenerationTest extends TestCase
             ->assertJsonPath('graph.nodes.0.type', 'start')
             ->assertJsonPath('graph.nodes.1.position.x', 160)
             ->assertJsonPath('graph.nodes.1.position.y', 350)
+            ->assertJsonPath('graph.nodes.1.data.owner_type', 'human')
+            ->assertJsonPath('graph.nodes.2.data.owner_type', 'system')
             ->assertJsonCount(4, 'graph.edges');
         $this->assertDatabaseCount('workflow_nodes', 0);
         Http::assertSent(fn ($request): bool => $request->hasHeader('Authorization', 'Bearer test-key')
@@ -159,7 +161,7 @@ class WorkflowAIGenerationTest extends TestCase
             'nodes' => [
                 ['id' => 'start', 'type' => 'start', 'label' => 'Début', 'description' => '', 'owner' => '', 'duration' => null, 'color' => 'mint'],
                 ['id' => 'check', 'type' => 'condition', 'label' => 'Budget suffisant ?', 'description' => '', 'owner' => 'Responsable', 'duration' => 1, 'color' => 'lavender'],
-                ['id' => 'approve', 'type' => 'approval', 'label' => 'Valider', 'description' => '', 'owner' => 'Achats', 'duration' => 1, 'color' => 'sand'],
+                ['id' => 'approve', 'type' => 'approval', 'label' => 'Valider', 'description' => '', 'owner' => 'Système achats', 'owner_type' => 'system', 'duration' => 1, 'color' => 'sand'],
                 ['id' => 'accepted', 'type' => 'end', 'label' => 'Acceptée', 'description' => '', 'owner' => '', 'duration' => null, 'color' => 'mint'],
                 ['id' => 'rejected', 'type' => 'end', 'label' => 'Rejetée', 'description' => '', 'owner' => '', 'duration' => null, 'color' => 'rose'],
             ],
